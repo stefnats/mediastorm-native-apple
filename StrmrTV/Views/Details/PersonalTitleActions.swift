@@ -6,6 +6,7 @@ import SwiftUI
 struct PersonalTitleActions: View {
     let title: Title
     @State private var ratingContext: RatingPresentation?
+    @State private var artworkContext: RatingPresentation?
     private struct RatingPresentation: Identifiable {
         let id = UUID()
         let context: SourceActionContext
@@ -18,9 +19,18 @@ struct PersonalTitleActions: View {
                 Label("Personal rating…", systemImage: "heart.circle")
             }
             .accessibilityIdentifier("personal-title.rating")
+            Button {
+                artworkContext = RatingPresentation(context: APIClient.shared.sourceContext())
+            } label: {
+                Label("Personal pictures…", systemImage: "photo.on.rectangle")
+            }
+            .accessibilityIdentifier("personal-title.artwork")
         }
         .sheet(item: $ratingContext) { presentation in
             PersonalRatingSheet(title: title, context: presentation.context)
+        }
+        .sheet(item: $artworkContext) { presentation in
+            ContentArtworkView(title:title,context:presentation.context)
         }
     }
 }

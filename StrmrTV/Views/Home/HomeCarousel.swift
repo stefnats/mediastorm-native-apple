@@ -35,7 +35,7 @@ struct HomeCarousel: View {
     @ObservedObject private var remote = RemoteActivity.shared
 
     private var slides: [HomeCard] { HomeCarouselSource.slides(shelf) }
-    private var current: HomeCard? { slides.indices.contains(index) ? slides[index] : slides.first }
+    private var current: HomeCard? { (slides.indices.contains(index) ? slides[index] : slides.first)?.personalArtwork() }
 
     var body: some View {
         // Each title's text at its natural height, its foot on one line: a new title's

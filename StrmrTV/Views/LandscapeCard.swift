@@ -29,7 +29,8 @@ struct LandscapeCard: View {
 
     /// The art a card draws: its poster, else its 16:9 art. Nil for a symbol or logo
     /// tile, which draws none.
-    static func artURL(_ card: HomeCard, poster: Bool) -> URL? {
+    static func artURL(_ card: HomeCard, poster: Bool, artwork: PersonalArtworkStore = .shared) -> URL? {
+        let card = card.personalArtwork(using:artwork)
         guard card.symbol == nil, !card.logoTile else { return nil }
         return poster ? Artwork.url(card.posterURL ?? card.artworkURL, size: "w342")
                       : Artwork.url(card.artworkURL, size: "w780")

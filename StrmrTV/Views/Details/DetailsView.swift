@@ -178,7 +178,8 @@ struct DetailsView: View {
         ZStack {
             // Below the fold the backdrop blurs behind the rows, in step with the scroll. The
             // trailer is stopped by then, so it stays out of the blur.
-            Backdrop(url: Artwork.url(title?.backdrop?.url ?? target.backdropURL), blurred: !focusInHeader)
+            Backdrop(url: Artwork.url(PersonalArtworkStore.shared.backdrop(title?.id ?? target.titleID,
+                original:title?.backdrop?.url ?? target.backdropURL)), blurred: !focusInHeader)
                 .overlay { TrailerBackdropVideo(trailer: trailer) }
                 .overlay { Color.black.opacity(focusInHeader ? 0 : 0.2) }
                 .animation(.easeInOut(duration: 0.35), value: focusInHeader)
