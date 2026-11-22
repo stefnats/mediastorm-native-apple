@@ -24,6 +24,7 @@ extension HomeView {
                     // Mid-swap, the row fading out keeps its title's info.
                     HeroInfo(hero: hero(swapFrom) ?? hero, size: size, textScale: layout.heroTextSize.scale)
                         .opacity(carousel && carouselShown ? 0 : 1)
+                        .sourceHintVisible((!carousel || !carouselShown) && (!size.oneShelf || rowFade > 0.01) ? (hero(swapFrom) ?? hero)?.sourceHintCoordinate : nil,order:-1)
                 }
 
                 VStack(alignment: .leading, spacing: 0) {
