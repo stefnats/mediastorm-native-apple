@@ -121,8 +121,8 @@ enum MobileSection: String, CaseIterable, Identifiable, Hashable {
         let kids = AppSession.shared.profile?.isKidsProfile == true
         let visible = allCases.filter { section in
             guard let tab = section.menuTab else { return true }
-            // Kids profiles don't get Live TV (as in the Expo app).
-            if section == .live, kids { return false }
+            // Child Live uses only its current programme-limited policy.
+            if section == .live, kids { return menu.showsKidsLive }
             return menu.isVisible(tab)
         }
         let ordered = DeviceOrder.apply(menu.order, to: visible.filter { $0 != .home }, id: \.rawValue)
@@ -185,7 +185,9 @@ enum MobileSection: String, CaseIterable, Identifiable, Hashable {
         case .lists: MobileListsView()
         case .calendar: MobileCalendarView()
         case .recordings: MobileRecordingsView()
-        case .live: MobileLiveView()
+        case .live:
+            if AppSession.shared.profile?.isKidsProfile == true { KidsLiveView() }
+            else { MobileLiveView() }
         case .sports: MobileSportsView()
         case .profiles: MobileProfilesView()
         case .downloads: MobileDownloadsView()
