@@ -74,6 +74,8 @@ struct PlaybackRequest {
     var speed: Float = 1
     /// Explicit combined-file consent cannot be reused for an external release.
     var fileOnlyPlayback = false
+    /// Delivered catalogue ordering, never inferred from an empty following list.
+    var postPlayStamp: PostPlayStamp? = nil
     var allowsExternalSourceSelection: Bool { !fileOnlyPlayback }
 
     #if DEBUG
@@ -156,8 +158,10 @@ struct PlaybackRequest {
         var art = artwork
         art.backdropURLs.removeAll { $0 == episode?.imageURL }
         if let still = next.imageURL, !still.isEmpty { art.backdropURLs.insert(still, at: 0) }
-        return PlaybackRequest(title: title, episode: next, start: nil, following: Array(following.dropFirst()),
-                               artwork: art, library: library)
+        var request = PlaybackRequest(title: title, episode: next, start: nil, following: Array(following.dropFirst()),
+                                      artwork: art, library: library)
+        request.postPlayStamp = postPlayStamp?.advancing(to: next)
+        return request
     }
 
     /// Identifies what a prequeue resolves: the title, the episode (in its ordering) and the

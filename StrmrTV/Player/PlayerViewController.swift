@@ -24,6 +24,9 @@ final class PlayerViewController: EnginePlayerViewController {
     var releaseHandoffTask: Task<Void, Never>?
     var loadTask: Task<Void, Never>?
     var didFinish = false
+    let postPlayEnd = PostPlayEndPolicy()
+    var postPlayTask: Task<Void, Never>?
+    var postPlayFailed = false
     lazy var skipSegments = SkipSegments(request: request)
     lazy var thumbnails = PlaybackThumbnails(path: streamPath, request: request)
     var thumbnailsStarted = false
@@ -262,6 +265,7 @@ final class PlayerViewController: EnginePlayerViewController {
     // MARK: Lifecycle
 
     func fail(_ message: String) {
+        postPlayFailed = true
         guard !didFinish, !isExitingToDetails else { return }
         log.error("playback failed: \(message)")
         PlaybackCoordinator.shared.errorMessage = message
@@ -294,6 +298,7 @@ final class PlayerViewController: EnginePlayerViewController {
                 exitToDetails(reason: "end of stream at \(Int(lastKnownPosition))s of \(Int(lastKnownDuration))s")
                 return
             }
+            if offerPostPlay() { return }
             reportProgress(ended: true)
             if let nextEpisode {
                 playNext(nextEpisode)
@@ -301,6 +306,7 @@ final class PlayerViewController: EnginePlayerViewController {
                 dismiss(animated: true)
             }
         case let .error(message):
+            postPlayFailed = true
             if resumeWatch != nil {
                 exitToDetails(reason: "error after resume: \(message)")
             } else {
@@ -314,6 +320,7 @@ final class PlayerViewController: EnginePlayerViewController {
     override func finish() {
         guard !didFinish else { return }
         didFinish = true
+        postPlayTask?.cancel()
         log.notice("player closed at \(self.lastKnownPosition)s of \(self.lastKnownDuration)s")
         loadTask?.cancel()
         audioPickTask?.cancel()

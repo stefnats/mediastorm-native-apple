@@ -6,7 +6,7 @@ import Foundation
 enum DetailsRequest {
     static func make(target: DetailsTarget, title: Title?, seasons: [Season], episode: Episode?,
                      start: StartPoint?, seed: UInt64, library: LibraryVersions?) -> PlaybackRequest {
-        PlaybackRequest(title: target, episode: episode.map(episodeInfo), start: start,
+        var request = PlaybackRequest(title: target, episode: episode.map(episodeInfo), start: start,
                         following: episode.map { airedEpisodes(after: $0, in: seasons) } ?? [],
                         artwork: .init(
                             backdropURLs: PlaybackRequest.Artwork.rotation(
@@ -17,6 +17,8 @@ enum DetailsRequest {
                                 seed: seed),
                             logoURL: title?.logo?.url),
                         library: library)
+        request.postPlayStamp = PostPlayStamp.capture(title: title, seasons: seasons, selected: episode)
+        return request
     }
 
     static func episodeInfo(_ ep: Episode) -> PlaybackRequest.EpisodeInfo {

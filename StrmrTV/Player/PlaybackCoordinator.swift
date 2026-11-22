@@ -18,6 +18,8 @@ final class PlaybackCoordinator: ObservableObject {
     @Published var errorMessage: String?
     /// Bumped whenever a playback session ends, so screens can refresh progress.
     @Published private(set) var sessionsEnded = 0
+    @Published private(set) var postPlay: PostPlayOffer?
+    private var postPlayOperation = UUID()
     /// The details page's prequeue as it resolves, for its Audio & Subtitles button.
     @Published private(set) var warm: WarmPrequeue?
 
@@ -180,6 +182,7 @@ final class PlaybackCoordinator: ObservableObject {
                resolve: @escaping @MainActor () async throws -> (path: String, tracks: TrackPreferences,
                                                                  source: SourceSwitch.Current)) {
         guard resolving == nil else { return }
+        retirePostPlay()
         let id = UUID()
         resolveID = id
         resolving = request
@@ -368,6 +371,23 @@ final class PlaybackCoordinator: ObservableObject {
             }
             return false
         } ?? false
+    }
+
+    /// A genuinely admitted new player retires the old pending/completing offer.
+    func retirePostPlay() { postPlayOperation = UUID(); postPlay = nil }
+    func beginPostPlay(_ id: UUID) -> UUID {
+        postPlayOperation = id; postPlay = nil; return id
+    }
+    func postPlayOperationCurrent(_ id: UUID) -> Bool { postPlayOperation == id && resolving == nil }
+    func publishPostPlay(_ offer: PostPlayOffer, operation: UUID) {
+        guard postPlayOperationCurrent(operation), operation == offer.id, !isPresentingPlayer,
+              api.isCurrent(offer.context) else { return }
+        postPlay = offer
+    }
+    func dismissPostPlay(_ id: UUID) { if postPlay?.id == id { postPlay = nil } }
+    func playPostPlay(_ request: PlaybackRequest, context: SourceActionContext, operation: UUID) {
+        guard postPlayOperationCurrent(operation), api.isCurrent(context), !isPresentingPlayer else { return }
+        postPlayOperation = UUID(); postPlay = nil; play(request)
     }
 
     func playerDidClose() {
