@@ -328,6 +328,8 @@ struct DetailsView: View {
 
             if let ratings = title?.ratings, !ratings.isEmpty { RatingsRow(ratings: ratings) }
 
+            if let title { PersonalTitleActions(title: title).id(title.id) }
+
             if let overview {
                 // Up from the actions reaches it only when it is cut off; select shows it whole.
                 ExpandableText(text: overview, lineLimit: 3, fontSize: 26, onlyWhenTruncated: true) {

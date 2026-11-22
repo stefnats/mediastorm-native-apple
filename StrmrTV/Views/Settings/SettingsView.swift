@@ -86,6 +86,7 @@ struct SettingsView: View {
                 Button("Switch Profile") { Task { await session.switchProfile() } }
                 NavigationLink("Hidden Items") { HiddenItemsSettingsView() }
                     .accessibilityHint(Text("Titles hidden from Continue Watching or from this profile"))
+                NavigationLink("Starting interests") { TasteSetupView() }
             }
 
             Section("Home") {

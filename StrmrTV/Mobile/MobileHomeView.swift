@@ -48,11 +48,15 @@ private struct MobileHomeContent: View {
     @State private var surpriseError: String?
     @State private var askingAI = false
     @State private var aiPrompt = ""
+    @State private var isOnScreen = false
 
     var body: some View {
         lifecycle(page)
             .environment(\.homeAction) { run($0) }
             .modifier(actionAlerts)
+            .offerTasteSetup(ready: store.hasLoaded && isOnScreen && scenePhase == .active)
+            .onAppear { isOnScreen = true }
+            .onDisappear { isOnScreen = false }
     }
 
     private var page: some View {
@@ -105,6 +109,10 @@ private struct MobileHomeContent: View {
             }
             // Hidden / unhidden titles leave or rejoin every row the server builds.
             .onReceive(NotificationCenter.default.publisher(for: .titleStateChanged)) { _ in
+                Task { await store.load() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .personalTasteChanged)) { event in
+                guard let context = event.object as? SourceActionContext, APIClient.shared.isCurrent(context) else { return }
                 Task { await store.load() }
             }
     }

@@ -34,6 +34,7 @@ struct MobileDetailsView: View {
                     hero(size: geo.size)
                     VStack(alignment: .leading, spacing: 22) {
                         headerText
+                        if let title = model.title { PersonalTitleActions(title: title).id(title.id) }
                         actionsSection
                         prequeueSection
                         if !target.isMovie { episodesSection }

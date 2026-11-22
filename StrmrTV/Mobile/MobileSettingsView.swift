@@ -27,6 +27,7 @@ struct MobileSettingsView: View {
                     .padding(.vertical, 4)
                     .accessibilityElement(children: .combine)
                     Button("Switch Profile") { Task { await session.switchProfile() } }
+                    NavigationLink("Starting interests") { TasteSetupView() }
                     NavigationLink {
                         MobileHiddenItemsView()
                     } label: {
