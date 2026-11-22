@@ -5,14 +5,19 @@ extension APIClient {
     /// (`favoriteIds`) first and through every filter; hidden channels are dropped here.
     func liveChannels(sourceID: String?, categories: [String], favoritesOnly: Bool, search: String,
                       favoriteIDs: [String], offset: Int, limit: Int) async throws -> LiveChannelsPage {
-        var body: [String: Any] = [
-            "profileId": profileID, "offset": offset, "limit": limit,
-            "favoriteIds": favoriteIDs, "favoritesOnly": favoritesOnly,
-        ]
+        let body = Self.liveChannelsBody(profileID: profileID, sourceID: sourceID, categories: categories,
+            favoritesOnly: favoritesOnly, search: search, favoriteIDs: favoriteIDs, offset: offset, limit: limit)
+        return try await send("POST", "/api/live/channels", jsonObject: body, timeout: 60)
+    }
+
+    static func liveChannelsBody(profileID: String, sourceID: String?, categories: [String], favoritesOnly: Bool,
+                                 search: String, favoriteIDs: [String], offset: Int, limit: Int) -> [String: Any] {
+        var body: [String: Any] = ["groupByStation": true, "profileId": profileID, "offset": offset, "limit": limit,
+                                   "favoriteIds": favoriteIDs, "favoritesOnly": favoritesOnly]
         if let sourceID { body["sourceId"] = sourceID }
         if !categories.isEmpty { body["categories"] = categories }
         if !search.isEmpty { body["filter"] = search }
-        return try await send("POST", "/api/live/channels", jsonObject: body, timeout: 60)
+        return body
     }
 
     func epgStatus() async throws -> EPGStatus {

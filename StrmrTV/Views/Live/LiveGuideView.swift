@@ -37,7 +37,7 @@ struct LiveGuideView: View {
         let channels = store.visibleChannels
         // Up on the controls (after Menu), the panel keeps the cell focus left.
         let shown = focus ?? (store.focusMemory as? GuideCellID)
-        let focused = shown.flatMap { id in channels.first { $0.id == id.channel } }
+        let focused = shown.flatMap { id in channels.first { $0.presentationKey == id.channel } }
         VStack(alignment: .leading, spacing: 0) {
             GuideInfoPanel(channel: focused ?? channels.first, program: focused.flatMap { program(for: shown!, in: $0) },
                            now: now)
@@ -48,19 +48,30 @@ struct LiveGuideView: View {
                 .padding(.bottom, 8)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Self.rowSpacing) {
-                    ForEach(channels) { channel in
-                        GuideRow(channel: channel, cells: cells(for: channel), scale: scale, now: now,
-                                 isFavorite: store.favorites.contains(channel.id),
-                                 recordings: store.recordings.filter { $0.channelId == channel.id }, focus: $focus)
-                            .id(channel.id)
-                            .onAppear {
-                                onScreen.ids.insert(channel.id)
-                                store.needSchedule(channel, from: windowStart, to: windowEnd)
-                                if channel.id == channels[max(0, channels.count - 20)].id {
-                                    Task { await store.loadMore() }
-                                }
+                    ForEach(store.stationSections) { section in
+                        if section.stationID != nil {
+                            Button { store.toggleStation(section) } label: {
+                                Label("\(section.name) · \(section.scope)", systemImage: store.isCollapsed(section) ? "chevron.right" : "chevron.down")
                             }
-                            .onDisappear { onScreen.ids.remove(channel.id) }
+                            .focused($focus, equals: GuideCellID(channel: section.id, start: .distantPast))
+                        }
+                        if !store.isCollapsed(section) {
+                            ForEach(section.channels, id: \.presentationKey) { channel in
+                                GuideRow(channel: channel, cells: cells(for: channel), scale: scale, now: now,
+                                         isFavorite: store.favorites.contains(channel.id),
+                                         recordings: store.recordings.filter { $0.channelId == channel.id }, focus: $focus)
+                                    .id(channel.presentationKey)
+                                    .onAppear {
+                                        onScreen.ids.insert(channel.presentationKey)
+                                        store.needSchedule(channel, from: windowStart, to: windowEnd)
+                                        if channel.presentationKey == channels[max(0, channels.count - 20)].presentationKey {
+                                            Task { await store.loadMore() }
+                                        }
+                            }
+                            .onDisappear { onScreen.ids.remove(channel.presentationKey) }
+                            }
+                        }
+                        Color.clear.frame(height: 1).onAppear { store.stationAppeared(section) }
                     }
                 }
                 .padding(.horizontal, CardGridLayout.inset)
@@ -74,7 +85,7 @@ struct LiveGuideView: View {
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .onChange(of: windowStart) {
-            for channel in channels where onScreen.ids.contains(channel.id) {
+            for channel in channels where onScreen.ids.contains(channel.presentationKey) {
                 store.needSchedule(channel, from: windowStart, to: windowEnd)
             }
         }
@@ -98,14 +109,15 @@ struct LiveGuideView: View {
     // MARK: Cells
 
     private func cells(for channel: LiveChannel) -> [GuideCell] {
-        GuideCell.layout(channel: channel.id, programs: store.schedules[channel.guideKey] ?? [],
+        GuideCell.layout(channel: channel.presentationKey, programs: store.schedules[channel.guideKey] ?? [],
                          from: windowStart, to: windowEnd)
     }
 
     /// A remembered cell in the guide as it is now: the same cell, or (its programme gone)
     /// the channel's cell at that time, else what airs now. Nil once the channel is gone.
     private func match(_ id: GuideCellID) -> GuideCellID? {
-        guard let channel = store.visibleChannels.first(where: { $0.id == id.channel }) else { return nil }
+        if id.start == .distantPast, store.stationSections.contains(where: { $0.stationID != nil && $0.id == id.channel }) { return id }
+        guard let channel = store.displayedChannels.first(where: { $0.presentationKey == id.channel }) else { return nil }
         let row = cells(for: channel)
         if row.contains(where: { $0.id == id }) { return id }
         let at = row.first { $0.start <= id.start && id.start < $0.end }
@@ -120,7 +132,7 @@ struct LiveGuideView: View {
     /// Pages the window when focus is on the first / last cell of its row and the press
     /// points off the row, then keeps focus on the programme at the time it moved to.
     private func move(_ direction: MoveCommandDirection) {
-        guard let id = focus, let channel = store.visibleChannels.first(where: { $0.id == id.channel }),
+        guard let id = focus, let channel = store.displayedChannels.first(where: { $0.presentationKey == id.channel }),
               let cell = cells(for: channel).first(where: { $0.id == id }) else { return }
         let target: Date
         switch direction {
@@ -203,6 +215,7 @@ private struct GuideRow: View {
                 ChannelLogo(channel: channel, size: CGSize(width: 100, height: 56), font: .title3, namesChannel: false)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(channel.name).font(.caption.weight(.semibold)).lineLimit(2)
+                    if let source = channel.sourceName { Text(source).font(.caption2).lineLimit(1) }
                     HStack(spacing: 8) {
                         if playingID == channel.id {
                             Image(systemName: "play.fill").font(.caption2).foregroundStyle(Color.accentColor)

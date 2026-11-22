@@ -175,7 +175,7 @@ struct MobileLiveView: View {
     private var moreMenu: some View {
         Menu {
             if let total = store.total {
-                Section("\(total) channels") {}
+                Section(store.loadedSummary) {}
             }
             Toggle(isOn: $store.showHidden) {
                 Label("Show Hidden Channels", systemImage: "eye.slash")

@@ -50,19 +50,31 @@ struct MobileGuideView: View {
                 Divider()
                 ScrollView(.vertical) {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(channels) { channel in
-                            MobileGuideRow(channel: channel, cells: cells(for: channel, window), start: start, scale: scale,
-                                           now: now, channelWidth: channelWidth, offsetX: max(0, offsetX), compact: compact)
-                                .frame(height: rowHeight)
-                                .onAppear {
-                                    onScreen.ids.insert(channel.id)
-                                    store.needSchedule(channel, from: leadingTime, to: leadingTime.addingTimeInterval(visibleSpan))
-                                    if channel.id == channels[max(0, channels.count - 20)].id {
-                                        Task { await store.loadMore() }
-                                    }
+                        ForEach(store.stationSections) { section in
+                            if section.stationID != nil {
+                                Button { store.toggleStation(section) } label: {
+                                    Label("\(section.name) · \(section.scope)", systemImage: store.isCollapsed(section) ? "chevron.right" : "chevron.down")
+                                        .frame(width: max(width, channelWidth), alignment: .leading)
                                 }
-                                .onDisappear { onScreen.ids.remove(channel.id) }
-                            Divider()
+                                .offset(x: max(0, offsetX))
+                            }
+                            if !store.isCollapsed(section) {
+                                ForEach(section.channels, id: \.presentationKey) { channel in
+                                    MobileGuideRow(channel: channel, cells: cells(for: channel, window), start: start, scale: scale,
+                                                   now: now, channelWidth: channelWidth, offsetX: max(0, offsetX), compact: compact)
+                                        .frame(height: rowHeight)
+                                        .onAppear {
+                                            onScreen.ids.insert(channel.presentationKey)
+                                            store.needSchedule(channel, from: leadingTime, to: leadingTime.addingTimeInterval(visibleSpan))
+                                            if channel.presentationKey == channels[max(0, channels.count - 20)].presentationKey {
+                                                Task { await store.loadMore() }
+                                            }
+                                        }
+                                        .onDisappear { onScreen.ids.remove(channel.presentationKey) }
+                                    Divider()
+                                }
+                            }
+                            Color.clear.frame(height: 1).onAppear { store.stationAppeared(section) }
                         }
                     }
                     .background(alignment: .topLeading) { nowLine }
@@ -110,7 +122,7 @@ struct MobileGuideView: View {
     }
 
     private func loadVisible(_ channels: [LiveChannel]) {
-        for channel in channels where onScreen.ids.contains(channel.id) {
+        for channel in channels where onScreen.ids.contains(channel.presentationKey) {
             store.needSchedule(channel, from: leadingTime, to: leadingTime.addingTimeInterval(visibleSpan))
         }
     }

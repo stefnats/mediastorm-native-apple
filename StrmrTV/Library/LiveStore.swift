@@ -129,6 +129,26 @@ final class LiveStore: ObservableObject {
         showHidden || hidden.isEmpty ? channels : channels.filter { !hidden.contains($0.id) }
     }
 
+    @Published private(set) var collapsedStations = Set<String>()
+    var stationSections: [LiveStationGroups.Section] { LiveStationGroups.sections(visibleChannels) }
+    var displayedChannels: [LiveChannel] {
+        stationSections.filter { !isCollapsed($0) }.flatMap(\.channels)
+    }
+    var loadedSummary: String {
+        if let total { return "\(channels.count) channels loaded of \(total) listed" }
+        return "\(channels.count) channels loaded"
+    }
+    func isCollapsed(_ section: LiveStationGroups.Section) -> Bool {
+        section.stationID.map { collapsedStations.contains($0) } ?? false
+    }
+    func toggleStation(_ section: LiveStationGroups.Section) {
+        guard let id = section.stationID else { return }
+        if collapsedStations.remove(id) == nil { collapsedStations.insert(id) }
+    }
+    func stationAppeared(_ section: LiveStationGroups.Section) {
+        if stationSections.last?.id == section.id, hasMore { Task { await loadMore() } }
+    }
+
     /// The guide or grid cell that last had focus, so down after Menu can land back on it.
     var focusMemory: AnyHashable?
 
@@ -194,8 +214,8 @@ final class LiveStore: ObservableObject {
                 // them in every category and search), so they go only with Favorites.
                 favoriteIDs: favoritesOnly ? Array(favorites) : [], offset: offset, limit: Self.pageSize)
             guard requested == query else { return }
-            var seen = Set<String>(offset == 0 ? [] : channels.map(\.id))
-            let fresh = page.channels.filter { seen.insert($0.id).inserted }
+            var seen = Set<String>(offset == 0 ? [] : channels.map(\.presentationKey))
+            let fresh = page.channels.filter { seen.insert($0.presentationKey).inserted }
             channels = offset == 0 ? fresh : channels + fresh
             hasMore = page.hasMore && !page.channels.isEmpty
             total = page.total

@@ -15,6 +15,9 @@ struct LiveChannel: Codable, Identifiable, Hashable {
     let tvgName: String?
     let sourceId: String?
     let sourceName: String?
+    var stationId: String? = nil
+    var stationName: String? = nil
+    var stationVariants: Int? = nil
     /// Provider-local id, sent as `channelId` when tuning.
     let playbackId: String?
     /// The stream picked under Choose Source, for a channel that is a Stremio addon's stream

@@ -11,24 +11,35 @@ struct MobileChannelList: View {
     var body: some View {
         let channels = store.visibleChannels
         List {
-            Section {
-                ForEach(channels) { channel in
-                    MobileChannelRow(channel: channel, now: now)
-                        .onAppear {
-                            store.needNowNext(channel)
-                            if channel.id == channels[max(0, channels.count - 20)].id {
-                                Task { await store.loadMore() }
+            ForEach(store.stationSections) { section in
+                Section {
+                    if !store.isCollapsed(section) {
+                        ForEach(section.channels, id: \.presentationKey) { channel in
+                            VStack(alignment: .leading, spacing: 4) {
+                                MobileChannelRow(channel: channel, now: now)
+                                if let source = channel.sourceName { Text(source).font(.caption).foregroundStyle(.secondary) }
+                            }
+                            .onAppear {
+                                store.needNowNext(channel)
+                                if channel.presentationKey == channels[max(0, channels.count - 20)].presentationKey {
+                                    Task { await store.loadMore() }
+                                }
                             }
                         }
-                }
-                if store.isLoading {
-                    ProgressView().frame(maxWidth: .infinity)
-                }
-            } header: {
-                if store.filter != .all || store.sourceID != nil {
-                    Text(header)
+                    }
+                    Color.clear.frame(height: 1).onAppear { store.stationAppeared(section) }
+                } header: {
+                    if section.stationID != nil {
+                        Button { store.toggleStation(section) } label: {
+                            Label("\(section.name) · \(section.scope)", systemImage: store.isCollapsed(section) ? "chevron.right" : "chevron.down")
+                        }
+                    } else if store.filter != .all || store.sourceID != nil {
+                        Text(header)
+                    }
                 }
             }
+            if store.isLoading { ProgressView().frame(maxWidth: .infinity) }
+
         }
         .listStyle(.plain)
         .refreshable { await store.reload(force: true) }
