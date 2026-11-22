@@ -45,6 +45,9 @@ its actual commit. The job records actual tools, requires Xcode 27 and Swift 6.4
 selects an installed available tvOS 18+ Apple TV simulator, runs `StrmrTVTests`, and
 compiles `StrmrMobile` for the iOS simulator. It preserves logs and the xcresult.
 It does not publish apps, install on real devices, create releases or push source.
+After successful environment preparation, the iOS build also runs when tvOS
+fails, so one platform cannot hide the other platform's compiler findings.
+The job still fails if either required build or unit suite fails.
 The first published run used Xcode 26.6 / Swift 6.3.3 and failed while compiling
 the pinned player dependency, before application tests could run. The workflow
 now uses the same `xcode-27` runner as the dependency's own CI, selects its

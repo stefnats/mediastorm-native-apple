@@ -37,6 +37,7 @@ jobs:
           ref: ${{ inputs.source_ref || github.sha }}
           persist-credentials: false
       - name: Record actual source and supported tools
+        id: prepare
         run: |
           set -euo pipefail
           mkdir -p artifacts .build/temporary
@@ -96,6 +97,8 @@ jobs:
             -only-testing:StrmrTVTests \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee artifacts/tvos-xctest.log
       - name: Compile the shared iOS application and phone UI
+        id: ios_build
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
         run: |
           set -euo pipefail
           export TMPDIR="$GITHUB_WORKSPACE/.build/temporary"
@@ -104,6 +107,7 @@ jobs:
             -derivedDataPath .build/derived-data \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee artifacts/ios-build.log
       - name: Run hosted iPhone shared unit suite
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' && steps.ios_build.outcome == 'success' }}
         run: |
           set -euo pipefail
           export TMPDIR="$GITHUB_WORKSPACE/.build/temporary"
