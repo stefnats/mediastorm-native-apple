@@ -89,6 +89,7 @@ struct MobilePlaybackSettingsView: View {
             }
 
             Section {
+                EpisodeAutoplayControl()
                 Toggle("Auto Switch Sources", isOn: $autoSwitch.enabled)
             } footer: {
                 Text("Moves to another source when the current one fails or keeps stalling.")

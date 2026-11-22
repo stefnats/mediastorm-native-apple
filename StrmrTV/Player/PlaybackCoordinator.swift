@@ -20,6 +20,9 @@ final class PlaybackCoordinator: ObservableObject {
     @Published private(set) var sessionsEnded = 0
     @Published private(set) var postPlay: PostPlayOffer?
     private var postPlayOperation = UUID()
+    @Published private(set) var episodeRetry: EpisodeAdvanceFailure?
+    private lazy var episodeTransitions = EpisodeTransitionOwnership(current: { [weak self] in self?.api.isCurrent($0) == true })
+    private var deliveringEpisode: UUID?
     /// The details page's prequeue as it resolves, for its Audio & Subtitles button.
     @Published private(set) var warm: WarmPrequeue?
 
@@ -30,7 +33,7 @@ final class PlaybackCoordinator: ObservableObject {
     private var settings: (value: APIClient.PlaybackSettings, profile: String, fetched: Date)?
     /// A prequeue started ahead of time for the episode that plays next, keyed by
     /// `PlaybackRequest.prequeueKey`; `resolveStream` picks it up instead of starting over.
-    private var prefetched: (key: String, prequeueID: String)?
+    private var prefetched: (key: String, prequeueID: String, context: SourceActionContext, operation: UUID)?
     /// A prequeue started as a details page opened, for whatever the server would play there
     /// (the movie, or the series' next-up episode). `resolveStream` adopts it once; the title,
     /// profile and start time stay behind so re-opening the page doesn't search again.
@@ -58,10 +61,13 @@ final class PlaybackCoordinator: ObservableObject {
     /// Explicit Versions picks play their file; automatic library choices honor
     /// the server's source-preference capability before using the prequeue.
     func play(_ request: PlaybackRequest, picks: PrequeuePick? = nil) {
+        guard resolving == nil else { return }
         guard !request.fileOnlyPlayback || request.libraryVersion != nil else {
             errorMessage = String(localized: "Choose the combined library file explicitly again.")
             return
         }
+        if deliveringEpisode == nil { retirePostPlay() }
+        let episodeTicket = episodeTransitions.ticket
         if let explicit = request.libraryVersion { return playLibrary(request, version: explicit) }
         guard let legacyCopy = request.preferredLibraryVersion else { return playPrequeue(request, picks: picks) }
         guard resolving == nil else { return }
@@ -70,11 +76,13 @@ final class PlaybackCoordinator: ObservableObject {
         resolveID = id
         resolving = request
         resolvingStage = String(localized: "Checking source preference…")
+        if let episodeTicket { _ = episodeTransitions.bind(episodeTicket, resolve: id) }
         resolveTask = Task { [self] in
             do {
                 let preference = try await api.contentLocalPreference(request.title.titleID, context: context)
                 try Task.checkCancellation()
                 guard resolveID == id, api.isCurrent(context) else { return finishResolve(id) }
+                if let episodeTicket, !episodeTransitions.current(episodeTicket, resolve: id) { return finishResolve(id) }
                 finishResolve(id)
                 if preference.supported {
                     // The server resolves the complete profile/title/episode hierarchy.
@@ -88,7 +96,8 @@ final class PlaybackCoordinator: ObservableObject {
             } catch {
                 guard !Task.isCancelled, resolveID == id else { return }
                 finishResolve(id)
-                errorMessage = error.localizedDescription
+                if let episodeTicket { publishEpisodeFailure(episodeTicket, resolve: id, error: error) }
+                else { errorMessage = error.localizedDescription }
             }
         }
     }
@@ -122,6 +131,7 @@ final class PlaybackCoordinator: ObservableObject {
             discardReportedAlternative(lease)
             return
         }
+        retirePostPlay()
         begin(request, stage: String(localized: "Starting alternative…"), carry: carry) {
             do {
                 try ReleaseAlternativeHandoff.validate(ready, id: lease.id, request: request)
@@ -154,6 +164,8 @@ final class PlaybackCoordinator: ObservableObject {
             errorMessage = String(localized: "A combined library file cannot switch to an external release.")
             return
         }
+        guard resolving == nil else { return }
+        retirePostPlay()
         // A stream picked over a library copy (Switch Source) is no longer that copy.
         var streamed = request
         streamed.libraryVersion = nil
@@ -171,6 +183,7 @@ final class PlaybackCoordinator: ObservableObject {
     /// Stops a resolve in flight (Menu on the loading art) and returns to the page underneath.
     func cancelResolve() {
         guard resolving != nil else { return }
+        episodeTransitions.retire(); episodeRetry = nil
         resolveTask?.cancel()
         resolveTask = nil
         resolveID = UUID()
@@ -182,8 +195,11 @@ final class PlaybackCoordinator: ObservableObject {
                resolve: @escaping @MainActor () async throws -> (path: String, tracks: TrackPreferences,
                                                                  source: SourceSwitch.Current)) {
         guard resolving == nil else { return }
-        retirePostPlay()
+        let episodeTicket = episodeTransitions.ticket.flatMap { $0.request.prequeueKey == request.prequeueKey ? $0 : nil }
+        postPlayOperation = UUID(); postPlay = nil
+        if episodeTicket == nil { episodeTransitions.retire(); episodeRetry = nil }
         let id = UUID()
+        if let episodeTicket, !episodeTransitions.bind(episodeTicket, resolve: id) { return }
         resolveID = id
         resolving = request
         resolvingStage = stage
@@ -196,6 +212,7 @@ final class PlaybackCoordinator: ObservableObject {
                 let delay = UserDefaults.standard.double(forKey: "StrmrResolveDelay")
                 if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
                 #endif
+                if let episodeTicket, !episodeTransitions.current(episodeTicket, resolve: id) { return finishResolve(id) }
                 let (path, tracks, source) = try await resolve()
                 var transferred = false
                 defer {
@@ -205,7 +222,12 @@ final class PlaybackCoordinator: ObservableObject {
                 }
                 try Task.checkCancellation()
                 guard resolveID == id else { return }
-                guard let engine else { return finishResolve(id) }
+                if let episodeTicket, !episodeTransitions.current(episodeTicket, resolve: id) { return finishResolve(id) }
+                guard let engine else {
+                    finishResolve(id)
+                    if let episodeTicket { publishEpisodeFailure(episodeTicket, resolve: id, error: APIError.notReady("The player engine is unavailable")) }
+                    return
+                }
                 resolvingStage = String(localized: "Starting…")
                 resolvingDetail = nil
                 let showPreviews = await previews
@@ -223,14 +245,21 @@ final class PlaybackCoordinator: ObservableObject {
                     try api.requireSourceContext(context)
                     presentationRequest = try CombinedLibraryFilePlayback.request(request, version: version, playback: playback)
                 }
+                if let episodeTicket, !episodeTransitions.current(episodeTicket, resolve: id) { return finishResolve(id) }
                 transferred = presentPlayer(engine: engine, request: presentationRequest, path: path, tracks: tracks, source: source,
                                              carry: carry, previewsEnabled: showPreviews) { self.finishResolve(id) }
+                if let episodeTicket {
+                    if transferred { episodeTransitions.succeeded(episodeTicket, resolve: id); episodeRetry = nil }
+                    else { finishResolve(id); publishEpisodeFailure(episodeTicket, resolve: id, error: APIError.notReady("The player could not be presented")) }
+                }
             } catch is CancellationError {
+                if let episodeTicket, episodeTransitions.current(episodeTicket, resolve: id) { episodeTransitions.retire(); episodeRetry = nil }
                 finishResolve(id)
             } catch {
                 guard !Task.isCancelled, resolveID == id else { return }
                 finishResolve(id)
-                errorMessage = error.localizedDescription
+                if let episodeTicket { publishEpisodeFailure(episodeTicket, resolve: id, error: error) }
+                else { errorMessage = error.localizedDescription }
             }
         }
     }
@@ -276,21 +305,25 @@ final class PlaybackCoordinator: ObservableObject {
 
     /// Starts resolving `request` on the server ahead of time (the player calls this near the
     /// end of an episode), so the next episode starts quickly. Failures are left for `play`.
-    func prefetch(_ request: PlaybackRequest) {
+    func prefetch(_ request: PlaybackRequest, context: SourceActionContext) {
+        guard api.isCurrent(context) else { return }
         guard request.libraryVersion == nil, !request.fileOnlyPlayback else { return }
         let key = request.prequeueKey
-        guard prefetched?.key != key else { return }
-        prefetched = (key, "")
+        guard prefetched?.key != key || prefetched?.context != context else { return }
+        let operation = UUID()
+        prefetched = (key, "", context, operation)
         Task {
             do {
                 if request.preferredLibraryVersion != nil {
-                    let preference = try await api.contentLocalPreference(request.title.titleID, context: api.sourceContext())
-                    guard preference.supported else { prefetched = nil; return }
+                    let preference = try await api.contentLocalPreference(request.title.titleID, context: context)
+                    guard preference.supported else { if prefetched?.operation == operation { prefetched = nil }; return }
                 }
+                try api.requireSourceContext(context); try Task.checkCancellation()
                 let started = try await api.startPrequeue(prequeueBody(request))
-                if prefetched?.key == key { prefetched = (key, started.prequeueId) }
+                try api.requireSourceContext(context); try Task.checkCancellation()
+                if prefetched?.operation == operation { prefetched = (key, started.prequeueId, context, operation) }
             } catch {
-                if prefetched?.key == key { prefetched = nil }
+                if prefetched?.operation == operation { prefetched = nil }
             }
         }
     }
@@ -374,7 +407,37 @@ final class PlaybackCoordinator: ObservableObject {
     }
 
     /// A genuinely admitted new player retires the old pending/completing offer.
-    func retirePostPlay() { postPlayOperation = UUID(); postPlay = nil }
+    func retirePostPlay() {
+        postPlayOperation = UUID(); postPlay = nil
+        episodeTransitions.retire(); episodeRetry = nil
+    }
+    func prepareNextEpisode(_ request: PlaybackRequest, context: SourceActionContext) -> EpisodeTransitionTicket? {
+        guard resolving == nil else { return nil }
+        postPlayOperation = UUID(); postPlay = nil; episodeRetry = nil
+        return episodeTransitions.prepare(request, context: context)
+    }
+    func episodeTransitionCurrent(_ ticket: EpisodeTransitionTicket) -> Bool { episodeTransitions.current(ticket) }
+    func deliverNextEpisode(_ ticket: EpisodeTransitionTicket) {
+        guard resolving == nil, !isPresentingPlayer, episodeTransitions.current(ticket) else { return }
+        deliveringEpisode = ticket.id
+        defer { deliveringEpisode = nil }
+        play(ticket.request)
+    }
+    private func publishEpisodeFailure(_ ticket: EpisodeTransitionTicket, resolve: UUID, error: Error) {
+        if let failure = episodeTransitions.failed(ticket, resolve: resolve, error: error) { episodeRetry = failure }
+    }
+    func episodeRetryCurrent(_ failure: EpisodeAdvanceFailure) -> Bool {
+        episodeTransitions.current(failure.ticket) && episodeRetry?.id == failure.id
+    }
+    func dismissEpisodeRetry(_ failure: EpisodeAdvanceFailure, queuedRetry: Bool = false) {
+        guard episodeRetry?.id == failure.id else { return }
+        episodeRetry = nil
+        if !queuedRetry { episodeTransitions.dismiss(failure) }
+    }
+    func retryNextEpisode(_ failure: EpisodeAdvanceFailure) {
+        guard resolving == nil, !isPresentingPlayer, let next = episodeTransitions.retry(failure) else { return }
+        deliverNextEpisode(next)
+    }
     func beginPostPlay(_ id: UUID) -> UUID {
         postPlayOperation = id; postPlay = nil; return id
     }
@@ -396,7 +459,7 @@ final class PlaybackCoordinator: ObservableObject {
     }
 
     private func resolveStream(_ request: PlaybackRequest) async throws -> PrequeueStatus {
-        if let prefetched, prefetched.key == request.prequeueKey, !prefetched.prequeueID.isEmpty {
+        if let prefetched, api.isCurrent(prefetched.context), prefetched.key == request.prequeueKey, !prefetched.prequeueID.isEmpty {
             self.prefetched = nil
             do {
                 return try await awaitPrequeue(prefetched.prequeueID)
