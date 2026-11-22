@@ -77,7 +77,7 @@ final class RecordingDVRAPI: RecordingProgressAPI {
 
 @MainActor
 final class RecordingProgressFlowTests: XCTestCase {
-    private func until(_ predicate: () -> Bool) async { for _ in 0..<1000 { if !predicate() { await Task.yield() } } }
+    private func until(_ predicate: () -> Bool) async { for _ in 0..<1000 where !predicate() { await Task.yield() } }
 
     func testDetailAppearanceNeverAutomaticallyPreparesOrClaims() async throws {
         let original = try RecordingDVRFixture.observation(), api = RecordingDVRAPI(original)
