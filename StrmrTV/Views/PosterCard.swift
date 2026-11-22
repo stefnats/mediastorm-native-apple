@@ -83,13 +83,17 @@ struct PosterCard: View {
     }
 
     private var artwork: some View {
-        RemoteImage(url: Artwork.url(target.displayPosterURL, size: "w500"), size: CGSize(width: width, height: height)) { _ in
+        RemoteImage(url: Self.artURL(target), size: CGSize(width: width, height: height)) { _ in
             Rectangle().fill(.quaternary)
                 .overlay(Text(target.name).font(.caption).multilineTextAlignment(.center).padding())
         }
         .overlay(alignment: .topLeading) {
             ArtworkBadges(badge: badge, watch: watchBadge, unwatchedCount: unwatchedCount).padding(10)
         }
+    }
+
+    static func artURL(_ target: DetailsTarget, artwork: PersonalArtworkStore = .shared) -> URL? {
+        Artwork.url(artwork.poster(target.titleID,original:target.displayPosterURL),size:"w500")
     }
 }
 

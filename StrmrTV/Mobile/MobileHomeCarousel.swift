@@ -62,7 +62,7 @@ struct MobileHomeCarousel: View {
     private func prefetchNext() {
         guard slides.count > 1, width > 0 else { return }
         for step in [1, slides.count - 1] {
-            let card = slides[(index + step) % slides.count]
+            let card = slides[(index + step) % slides.count].personalArtwork()
             ImagePipeline.prefetch(Artwork.url(card.backdropURL ?? card.artworkURL), size: tileSize)
             ImagePipeline.prefetch(Artwork.logoURL(card.logoURL, size: "w500"), size: MobileHeroLogo.size, mode: .fit)
         }
@@ -86,7 +86,8 @@ struct MobileHomeHero: View {
     }
 
     private var tile: some View {
-        RemoteImage(url: Artwork.url(card.backdropURL ?? card.artworkURL), size: size) { _ in
+        let card = card.personalArtwork()
+        return RemoteImage(url: Artwork.url(card.backdropURL ?? card.artworkURL), size: size) { _ in
             Rectangle().fill(.quaternary)
         }
         .overlay {

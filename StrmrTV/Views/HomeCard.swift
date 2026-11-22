@@ -32,10 +32,10 @@ struct HomeCard: Identifiable, Hashable {
     /// Under the title on the card, and under the logo in the hero.
     let subtitle: String
     let overview: String?
-    let backdropURL: String?
+    var backdropURL: String?
     let logoURL: String?
     /// Card image: the next episode's still for Continue Watching, else the backdrop.
-    let artworkURL: String?
+    var artworkURL: String?
     /// For the explore card's collage.
     var posterURL: String?
     /// 0–1; 0 hides the bar.
@@ -65,6 +65,18 @@ struct HomeCard: Identifiable, Hashable {
 
     var target: DetailsTarget? {
         if case let .details(target) = link { target } else { nil }
+    }
+
+    /// Only linked title pictures change. Episode stills, identity, progress,
+    /// library files, provider logos and aggregate collages keep their originals.
+    @MainActor
+    func personalArtwork(using store: PersonalArtworkStore = .shared) -> HomeCard {
+        guard let target, !logoTile, symbol == nil, collageURLs.isEmpty else { return self }
+        var copy = self
+        copy.posterURL = store.poster(target.titleID,original:posterURL)
+        copy.backdropURL = store.backdrop(target.titleID,original:backdropURL)
+        if episode == nil { copy.artworkURL = store.backdrop(target.titleID,original:artworkURL) }
+        return copy
     }
 
     init(_ item: ContinueWatchingItem) {

@@ -12,7 +12,8 @@ struct HeroContent: Equatable {
     /// black in place of a backdrop, as the Expo home does; the title is then the name.
     var framedLogoURL: String?
 
-    init(_ card: HomeCard) {
+    @MainActor init(_ original: HomeCard, artwork: PersonalArtworkStore = .shared) {
+        let card = original.personalArtwork(using:artwork)
         id = card.id
         title = card.title
         subtitle = card.subtitle

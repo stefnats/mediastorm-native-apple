@@ -71,6 +71,7 @@ final class AppSession: ObservableObject {
 
     private init() {
         api.onSignedOut = { [weak self] in
+            PersonalArtworkStore.shared.clear()
             self?.resumeGate.profileActivated()
             self?.protectedBrowsingBlocked = false
             self?.resumeActivation = UUID()
@@ -314,6 +315,7 @@ final class AppSession: ObservableObject {
     }
 
     func signOut() async {
+        PersonalArtworkStore.shared.clear()
         resumeGate.profileActivated()
         protectedBrowsingBlocked = false
         resumeActivation = UUID()
@@ -374,6 +376,7 @@ final class AppSession: ObservableObject {
         protectedBrowsingBlocked = false
         resumeActivation = UUID()
         api.activate(profileID: chosen.id, profileName: chosen.name)
+        PersonalArtworkStore.shared.activate(api.sourceContext())
         profile = chosen
         profilePickRequired = false
         defaults.set(chosen.id, forKey: Key.lastProfileID)
@@ -398,6 +401,7 @@ final class AppSession: ObservableObject {
     }
 
     private func forgetEverything(reason: String) {
+        PersonalArtworkStore.shared.clear()
         leaveRemote(reason: reason)
         defaults.removeObject(forKey: Key.serverURL)
         defaults.removeObject(forKey: Key.lastProfileID)

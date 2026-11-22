@@ -161,6 +161,7 @@ struct HomeView: View {
         Group {
             if style.isClassic { classicPage } else { stackedPage }
         }
+        .offerTasteSetup(ready: store.hasLoaded && isOnScreen && !isCovered && scenePhase == .active)
         // Floats over the hero, so turning it on moves nothing.
         .overlay(alignment: .top) {
             if let viewChoices, layout.viewSwitcher {
@@ -231,6 +232,10 @@ struct HomeView: View {
         }
         // Hidden / unhidden titles leave or rejoin every row the server builds.
         .onReceive(NotificationCenter.default.publisher(for: .titleStateChanged)) { _ in
+            Task { await store.load() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .personalTasteChanged)) { event in
+            guard let context = event.object as? SourceActionContext, APIClient.shared.isCurrent(context) else { return }
             Task { await store.load() }
         }
         .onChange(of: focused) { _, focus in

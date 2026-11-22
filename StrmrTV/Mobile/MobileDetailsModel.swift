@@ -116,7 +116,9 @@ final class MobileDetailsModel: ObservableObject {
         return text?.isEmpty == false ? text : nil
     }
 
-    var backdropURL: String? { title?.backdrop?.url ?? target.backdropURL }
+    var backdropURL: String? {
+        PersonalArtworkStore.shared.backdrop(title?.id ?? target.titleID,original:title?.backdrop?.url ?? target.backdropURL)
+    }
 
     /// Where to resume, per the server's `resume.eligible` decision (no client thresholds).
     func resumePoint(_ episode: Episode?) -> StartPoint? {
