@@ -80,6 +80,7 @@ final class WatchRoomSession: ObservableObject, Identifiable {
     private var cleanup: Cleanup
     private var ownership: WatchRoomOwnership?
     private let departures: WatchRoomDepartures
+    private let now: () -> Date
     private var polling: Task<Void,Never>?
     private var closing: Task<Bool,Never>?
     var room: WatchRoom { observation.room }
@@ -88,18 +89,23 @@ final class WatchRoomSession: ObservableObject, Identifiable {
         return member?.joined == true && member?.clientId == context.clientID && member?.capabilities.nativePlayback == true && member?.capabilities.stateSync == true && (member?.capabilities.protocolVersion ?? 0) >= 1
     }
     init(room: WatchRoom, context: SourceActionContext, api: any WatchRoomsAPI = APIClient.shared, cleanup: Cleanup = .none,
-         ownership: WatchRoomOwnership? = nil, departures: WatchRoomDepartures = .shared) throws {
+         ownership: WatchRoomOwnership? = nil, departures: WatchRoomDepartures = .shared, now: @escaping () -> Date = { .now }) throws {
         try room.validate()
         guard room.member(context) != nil else { throw WatchRoomError.unavailable }
         id = room.id; self.context = context; target = try WatchRoomTarget(room:room)
         observation = WatchRoomObservation(room); transport = WatchRoomTransport(context:context,api:api); self.cleanup = cleanup
-        self.departures = departures; self.ownership = ownership
+        self.departures = departures; self.ownership = ownership; self.now = now
         if cleanup != .none {
             if self.ownership == nil { self.ownership = try departures.reserve(context:context,api:api) }
             try self.ownership?.bind(room.id,end:cleanup == .end)
         }
     }
-    func current() -> Bool { !closed && transport.current() && room.status != "ended" }
+    func current() -> Bool {
+        // Conservative local playback/UI boundary. The server still validates
+        // each request; the device clock is not an authority or a clock proof.
+        guard !closed, transport.current(), room.status != "ended", let expiry = RecordingCapture.date(room.expiresAt) else { return false }
+        return now() < expiry
+    }
     func assignPlayer() throws {
         guard current(), joined, !transferred, !uncertain else { throw WatchRoomError.unavailable }
         if ownership == nil { ownership = try departures.reserve(context:context,api:transport.api) }
