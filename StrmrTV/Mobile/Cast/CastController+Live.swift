@@ -18,6 +18,10 @@ extension CastController {
     /// Casts `channel` to `device`; `program` is what is on now (shown with the channel's name
     /// and logo).
     func startLive(on device: CastDevice, channel: LiveChannel, program: EPGProgram?) async {
+        let context = APIClient.shared.sourceContext()
+        let attempt = LivePlaybackAttempt(context: context, current: { [weak self] in
+            self?.session?.isLive == true && APIClient.shared.isCurrent(context)
+        })
         var session = Session(device: device, title: channel.name, subtitle: program?.title, artworkURL: channel.logoURL)
         session.isLive = true
         session.canSeek = false
@@ -27,14 +31,14 @@ extension CastController {
             switch device.kind {
             case .googleCast:
                 let connected = try await GoogleCastService.shared.connect(to: device)
-                let opened = try await openLive(channel, program: program, forceHLS: true)
+                let opened = try await openLive(channel, program: program, forceHLS: true, attempt: attempt)
                 let type = opened.isDirect ? Self.directLiveContentType(channel) : Self.hlsMime
                 return Prepared(transport: connected, media: liveMedia(opened.url, type, channel, program),
-                                hlsSessionID: opened.sessionID, playback: nil)
+                                hlsSessionID: opened.sessionID, playback: nil, liveContext: context)
             case .dlna:
                 let transport = try dlnaTransport(for: device)
-                let built = try await dlnaLiveMedia(for: transport, channel: channel, program: program)
-                return Prepared(transport: transport, media: built.media, hlsSessionID: built.hlsSessionID, playback: nil)
+                let built = try await dlnaLiveMedia(for: transport, channel: channel, program: program, attempt: attempt)
+                return Prepared(transport: transport, media: built.media, hlsSessionID: built.hlsSessionID, playback: nil, liveContext: context)
             }
         }
     }
@@ -42,18 +46,23 @@ extension CastController {
     /// `/api/live/hls/start` for a receiver: the stream URL (token in its query) and, for an
     /// HLS session, its id.
     private func openLive(_ channel: LiveChannel, program: EPGProgram?,
-                          forceHLS: Bool) async throws -> (url: URL, sessionID: String?, isDirect: Bool) {
+                          forceHLS: Bool, attempt: LivePlaybackAttempt) async throws -> (url: URL, sessionID: String?, isDirect: Bool) {
         let api = APIClient.shared
-        var query = api.liveStartQuery(channel, programTitle: program?.title)
-        query["target"] = "cast"
-        if forceHLS { query["format"] = "hls" }
-        let start: LiveStart = try await api.send("GET", "/api/live/hls/start", query: query, timeout: 60)
-        let isDirect = start.isDirect == true
-        guard let path = isDirect ? start.streamUrl : start.playlistUrl, !path.isEmpty,
-              isDirect || start.sessionId != nil else {
-            throw CastError(String(localized: "The server didn't start this channel for the TV."))
+        let start = try await api.openLiveStart(channel, programTitle: program?.title,
+            forceHLS: forceHLS, target: "cast", attempt: attempt)
+        do {
+            let isDirect = start.isDirect == true
+            guard let path = isDirect ? start.streamUrl : start.playlistUrl, !path.isEmpty,
+                  isDirect ? start.sessionId == nil : (start.sessionId.map(KidsLiveOpened.validSession) == true &&
+                    URLComponents(string: path)?.path == "/video/hls/\(start.sessionId!)/stream.m3u8") else {
+                throw CastError(String(localized: "The server didn't start this channel for the TV."))
+            }
+            return (try api.mediaURL(apiPath: path, context: attempt.context), isDirect ? nil : start.sessionId, isDirect)
+        } catch {
+            let cleanup = Task { try await api.retireLiveStart(start, context: attempt.context) }
+            do { try await cleanup.value } catch { attempt.stopUnconfirmed() }
+            throw error
         }
-        return (try api.mediaURL(apiPath: path), isDirect ? nil : start.sessionId, isDirect)
     }
 
     private func liveMedia(_ url: URL, _ contentType: String, _ channel: LiveChannel,
@@ -86,7 +95,7 @@ extension CastController {
     }
 
     private func dlnaLiveMedia(for transport: DLNATransport, channel: LiveChannel,
-                               program: EPGProgram?) async throws -> (media: CastMedia, hlsSessionID: String?) {
+                               program: EPGProgram?, attempt: LivePlaybackAttempt) async throws -> (media: CastMedia, hlsSessionID: String?) {
         let sinks = await transport.sinkProtocols()
         let hlsInfo = Self.protocolInfo(Self.hlsMime, operation: "00", converted: true)
         let takesHLS = DLNATransport.accepts(sinks, hlsInfo)
@@ -100,7 +109,7 @@ extension CastController {
 
         // 1. The channel as the source is set to open it: direct is the provider's mux untouched.
         if let tsInfo {
-            let opened = try await openLive(channel, program: program, forceHLS: false)
+            let opened = try await openLive(channel, program: program, forceHLS: false, attempt: attempt)
             if opened.isDirect {
                 log.notice("DLNA live: direct MPEG-TS (\(tsInfo.split(separator: ":")[2]))")
                 return (media(opened.url, tsInfo), nil)
@@ -109,10 +118,10 @@ extension CastController {
                 log.notice("DLNA live: HLS session")
                 return (media(opened.url, hlsInfo), opened.sessionID)
             }
-            if let id = opened.sessionID { await APIClient.shared.stopLiveSession(id) }
+            if let id = opened.sessionID { try await APIClient.shared.stopLiveSessionStrict(id, context: attempt.context) }
         } else if takesHLS {
             // 2. A cast HLS session.
-            let opened = try await openLive(channel, program: program, forceHLS: true)
+            let opened = try await openLive(channel, program: program, forceHLS: true, attempt: attempt)
             log.notice("DLNA live: HLS session")
             return (media(opened.url, hlsInfo), opened.sessionID)
         }

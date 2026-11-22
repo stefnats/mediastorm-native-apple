@@ -2,19 +2,24 @@ import Foundation
 
 /// What multiscreen needs from the server beyond the live player's calls: a channel opened as
 /// an HLS session whatever the server would pick, a strict stop, and the provider's stream usage.
-extension APIClient {
+extension APIClient: LiveMultiscreenAPI {
     /// Opens `channel` as an HLS session (`format=hls`). The session ID comes back even when
     /// the answer has no playable playlist, so the caller can still stop it.
-    func startLiveHLS(_ channel: LiveChannel) async throws -> (sessionID: String?, url: URL?) {
-        var query = liveStartQuery(channel, programTitle: nil)
-        query["format"] = "hls"
-        let start: LiveStart = try await send("GET", "/api/live/hls/start", query: query, timeout: 60)
-        let url = start.playlistUrl.flatMap { $0.isEmpty || start.isDirect == true ? nil : try? mediaURL(apiPath: $0) }
+    func startLiveHLS(_ channel: LiveChannel, attempt: LivePlaybackAttempt) async throws -> (sessionID: String?, url: URL?) {
+        let start = try await openLiveStart(channel, programTitle: nil, forceHLS: true, target: "native", attempt: attempt)
+        let url = start.playlistUrl.flatMap { $0.isEmpty || start.isDirect == true ? nil : try? mediaURL(apiPath: $0, context: attempt.context) }
         return (start.sessionId.flatMap { $0.isEmpty ? nil : $0 }, url)
     }
 
     /// `stopLiveSession` that reports failure, so a release can be retried.
-    func stopLiveSessionStrict(_ sessionID: String) async throws {
+    func stopLiveSessionStrict(_ sessionID: String, context: SourceActionContext? = nil) async throws {
+        if let context {
+            guard KidsLiveOpened.validSession(sessionID) else { throw APIError.notReady("Invalid live session") }
+            var request = try context.request("POST", path: "/api/video/hls/\(Self.segment(sessionID))/stop")
+            request.timeoutInterval = 10
+            _ = try await sendOriginalSourceAction(request)
+            return
+        }
         try await sendRaw("POST", "/api/video/hls/\(Self.segment(sessionID))/stop", promptOnLock: false, timeout: 10)
     }
 

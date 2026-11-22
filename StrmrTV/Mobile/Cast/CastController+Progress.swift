@@ -76,6 +76,16 @@ extension CastController {
     /// fetches nothing.
     private func keepAlive() {
         guard let id = hlsSessionID else { return }
+        if let context = liveStartContext {
+            guard liveKeepalive == nil else { return }
+            liveKeepalive = Task { [weak self] in
+                guard let self else { return }
+                defer { liveKeepalive = nil }
+                do { try await APIClient.shared.keepLiveSessionAliveStrict(id, context: context, paused: session?.state.phase == .paused) }
+                catch { Task { await self.finish(reason: "live session denied", stopReceiver: true) } }
+            }
+            return
+        }
         let paused = session?.state.phase == .paused
         Task {
             _ = try? await APIClient.shared.sendRaw("POST", "/api/video/hls/\(APIClient.segment(id))/keepalive",
@@ -84,17 +94,35 @@ extension CastController {
     }
 
     /// Ends the cast: progress saved, the receiver stopped (when asked), the server session let go.
-    func finish(reason: String, stopReceiver: Bool, ended: Bool = false) async {
+    func finish(reason: String, stopReceiver: Bool, ended: Bool = false, cancelStarting: Bool = true) async {
+        if cancelStarting { castStartGeneration = UUID() }
+        let pendingStart = startTask
+        startTask = nil
+        pendingStart?.cancel()
+        await pendingStart?.value
         pollTask?.cancel()
         pollTask = nil
+        let pendingKeepalive = liveKeepalive
+        liveKeepalive = nil
+        await pendingKeepalive?.value
         // Nothing running: a failed attempt stays on the remote until it is dismissed.
-        guard let transport else { return }
+        guard let transport else {
+            if let id = hlsSessionID, let context = liveStartContext { await stopCastHLS(id, context: context) }
+            if hlsSessionID == nil {
+                liveStartContext = nil
+                session = nil
+                CastPresenter.dismissRemote()
+            }
+            return
+        }
         log.notice("cast to \(transport.device.name) ended: \(reason)")
         reportProgress(ended: ended)
         self.transport = nil
         if stopReceiver { await transport.stop() }
-        if let id = hlsSessionID { await APIClient.shared.stopLiveSession(id) }
+        if let id = hlsSessionID { await stopCastHLS(id, context: liveStartContext) }
+        if liveStartContext != nil, hlsSessionID != nil { return }
         hlsSessionID = nil
+        liveStartContext = nil
         playback = nil
         session = nil
         CastPresenter.dismissRemote()

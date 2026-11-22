@@ -16,15 +16,28 @@ enum MultiscreenEntry {
 
 /// The server side of a tile: the provider's capacity is checked before every start.
 @MainActor
-struct MultiscreenAPITransport: MultiscreenTransport {
-    func start(_ channel: LiveChannel) async throws -> (sessionID: String?, url: URL?) {
-        let usage = try await APIClient.shared.liveUsage(sourceID: channel.sourceId)
-        guard usage.hasCapacity else { throw APIError.notReady("Provider connection limit reached") }
-        return try await APIClient.shared.startLiveHLS(channel)
+final class MultiscreenAPITransport: OriginalMultiscreenTransport {
+    private let context: SourceActionContext
+    private let api: any LiveMultiscreenAPI
+    private var owned: [String: SourceActionContext] = [:]
+    init(context: SourceActionContext? = nil, api: any LiveMultiscreenAPI = APIClient.shared) {
+        self.api = api; self.context = context ?? api.sourceContext()
     }
-
+    func start(_ channel: LiveChannel) async throws -> (sessionID: String?, url: URL?) {
+        try await start(channel, automatic: false, current: { self.api.isCurrent(self.context) })
+    }
+    func start(_ channel: LiveChannel, automatic: Bool, current: @escaping () -> Bool) async throws -> (sessionID: String?, url: URL?) {
+        let original = context
+        let attempt = LivePlaybackAttempt(context: original, permitsTakeover: !automatic,
+            current: { current() && self.api.isCurrent(original) })
+        let opened = try await api.startLiveHLS(channel, attempt: attempt)
+        if let id = opened.sessionID { owned[id] = original }
+        return opened
+    }
     func stop(_ sessionID: String) async throws {
-        try await APIClient.shared.stopLiveSessionStrict(sessionID)
+        let original = owned[sessionID] ?? context
+        try await api.stopLiveSessionStrict(sessionID, context: original)
+        owned[sessionID] = nil
     }
 }
 
@@ -101,7 +114,7 @@ final class MultiscreenController: ObservableObject {
             session.focus(1)
         case let .tune(channel):
             fromPlayer = true
-            session.tune(0, to: channel)
+            session.tune(0, to: channel, automatic: true)
             session.focus(1)
         case .resume:
             fromPlayer = false

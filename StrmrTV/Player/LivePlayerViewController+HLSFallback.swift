@@ -50,7 +50,7 @@ extension LivePlayerViewController {
     /// A direct stream that never played: tunes once more as HLS. False when that doesn't
     /// apply (an HLS tune, one that played, or the fallback already tried).
     func fallBackToHLS(_ reason: String) -> Bool {
-        guard !didFinish, tuneIsDirect, !tunePlayed, hlsMode == .asConfigured else { return false }
+        guard !didFinish, liveAttempt.canAutomaticallyRetry, tuneIsDirect, !tunePlayed, hlsMode == .asConfigured else { return false }
         guard !directWorkedForSource else {
             log.notice("live hls: direct stream failed before playing (\(reason)), but direct has played for this source before; not falling back")
             return false

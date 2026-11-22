@@ -8,7 +8,7 @@ extension MultiscreenController {
     func restore(_ selection: MultiscreenResume.Selection) {
         let channels = Array(selection.channels.prefix(MultiscreenSession.maxScreens))
         pendingAudio = channels.indices.contains(selection.audioIndex) ? channels[selection.audioIndex] : nil
-        let first = channels.prefix(2).enumerated().map { session.tune($0.offset, to: $0.element) }
+        let first = channels.prefix(2).enumerated().map { session.tune($0.offset, to: $0.element, automatic: true) }
         session.focus(0)
         pendingExtras = Array(channels.dropFirst(2))
         restoring = true
@@ -43,7 +43,7 @@ extension MultiscreenController {
                     controlsOpen = true
                     return
                 }
-                await session.tune(slots.count, to: channel).value
+                await session.tune(slots.count, to: channel, automatic: true).value
             }
         }
     }

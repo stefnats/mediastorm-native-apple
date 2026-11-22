@@ -40,6 +40,9 @@ final class CastController: ObservableObject {
     var playback: OriginalPlaybackProgress?
     /// The server HLS session the receiver reads: kept alive, stopped with the cast.
     var hlsSessionID: String?
+    var castStartGeneration = UUID()
+    var liveStartContext: SourceActionContext?
+    var liveKeepalive: Task<Void, Never>?
     var pollTask: Task<Void, Never>?
     private var searchTask: Task<Void, Never>?
     var startTask: Task<Void, Never>?

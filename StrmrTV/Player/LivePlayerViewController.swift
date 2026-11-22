@@ -34,6 +34,15 @@ final class LivePlayerViewController: EnginePlayerViewController {
     let program: EPGProgram?
     let api = APIClient.shared
 
+    lazy var liveAttempt: LivePlaybackAttempt = {
+        let context = api.sourceContext()
+        return LivePlaybackAttempt(context: context, current: { [weak self] in
+            self?.didFinish == false && APIClient.shared.isCurrent(context)
+        })
+    }()
+    private var hasRequestedTune = false
+    private var retiring: Task<Void, Error>?
+    private var keepAliveWork: Task<Void, Never>?
     var loadTask: Task<Void, Never>?
     var sessionID: String?
     /// The HLS session's playlist, which multiscreen takes over with the session (`addScreen`).
@@ -156,15 +165,29 @@ final class LivePlayerViewController: EnginePlayerViewController {
         // The new session starts with no subtitle; the pick is re-applied once it is offered.
         activeSubtitle = nil
         rebuildSubtitleMenu()
-        loadTask?.cancel()
+        let previous = loadTask
+        previous?.cancel()
+        let automatic = hasRequestedTune
+        hasRequestedTune = true
         loadTask = Task { [weak self] in
             guard let self else { return }
             do {
+                await previous?.value
+                try Task.checkCancellation()
+                guard !didFinish else { return }
                 endSession()
+                try await retiring?.value
                 if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
                 let forceHLS = await hlsForTune()
-                let start = try await api.startLive(channel, programTitle: program?.title, forceHLS: forceHLS)
-                try Task.checkCancellation()
+                let start = try await api.startLive(channel, programTitle: program?.title, forceHLS: forceHLS, attempt: liveAttempt, automatic: automatic)
+                // Record the receipt before observing cancellation, so even a
+                // departure at this return boundary has an owned stop path.
+                self.sessionID = start.sessionID
+                if Task.isCancelled || didFinish {
+                    endSession()
+                    try? await retiring?.value
+                    return
+                }
                 let (url, sessionID) = (start.url, start.sessionID)
                 if channel.hasStremioSources {
                     stremioFailover.noteTuned(index: start.stremioStreamIndex ?? channel.stremioStreamIndex,
@@ -183,9 +206,13 @@ final class LivePlayerViewController: EnginePlayerViewController {
                 _ = try await engine.load(url: url, options: makeLoadOptions(remoteHLS: sessionID != nil))
                 engine.play()
             } catch is CancellationError {
-                // A newer tune or the close replaced this one.
+                // Newer/closed starts already own cleanup. An explicit consent
+                // cancellation leaves the recording alone and closes this cover.
+                if !Task.isCancelled, !didFinish { dismiss(animated: true) }
             } catch {
-                guard !Task.isCancelled, !fallBackToHLS(error.localizedDescription) else { return }
+                guard !Task.isCancelled else { return }
+                if liveAttempt.blocksRetry(error) { fail(error.localizedDescription); return }
+                guard !fallBackToHLS(error.localizedDescription) else { return }
                 failOrFailOver(error.localizedDescription)
             }
         }
@@ -222,8 +249,13 @@ final class LivePlayerViewController: EnginePlayerViewController {
         guard sessionID != nil else { return }
         keepAliveTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let id = self?.sessionID else { return }
-                Task { await APIClient.shared.keepLiveSessionAlive(id) }
+                guard let self, let id = sessionID, keepAliveWork == nil else { return }
+                keepAliveWork = Task { [weak self] in
+                    guard let self else { return }
+                    defer { keepAliveWork = nil }
+                    do { try await api.keepLiveSessionAliveStrict(id, context: liveAttempt.context) }
+                    catch { if !didFinish, sessionID == id { fail(error.localizedDescription) } }
+                }
             }
         }
     }
@@ -235,7 +267,16 @@ final class LivePlayerViewController: EnginePlayerViewController {
         playlistURL = nil
         guard let id = sessionID else { return }
         sessionID = nil
-        Task { await APIClient.shared.stopLiveSession(id) }
+        let pending = keepAliveWork
+        let previous = retiring
+        keepAliveWork = nil
+        let context = liveAttempt.context
+        retiring = Task { [api, liveAttempt] in
+            await pending?.value
+            try await previous?.value
+            do { try await api.stopLiveSessionStrict(id, context: context) }
+            catch { liveAttempt.stopUnconfirmed(); throw error }
+        }
     }
 
     // MARK: Engine binding
@@ -390,6 +431,7 @@ final class LivePlayerViewController: EnginePlayerViewController {
     override func finish() {
         guard !didFinish else { return }
         didFinish = true
+        liveAttempt.close()
         loadTask?.cancel()
         failoverTask?.cancel()
         catchupTask?.cancel()
