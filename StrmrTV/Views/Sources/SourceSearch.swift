@@ -17,12 +17,16 @@ enum SourceSearch {
         let query: String
         /// The episode's ordering: "S01E02" is a different episode in each.
         var ordering: String? = nil
+        var numberingID: String? = nil
     }
 
     struct Snapshot {
         var results: [SourceResult]
         var health: [Int: SourceHealth]
         let at: Date
+        let context: SourceActionContext
+        let expiresAt: Date
+        let target: SourceFilterTarget?
     }
 
     /// How long a search is reused by Switch Source.
@@ -48,25 +52,47 @@ enum SourceSearch {
 
     /// Searches and keeps the results for this title / episode (the source picker, and
     /// Switch Source when nothing recent is kept).
-    static func search(title: DetailsTarget, query: String, numbering: EpisodeNumbering? = nil) async throws -> [SourceResult] {
-        let results = ordered(try await APIClient.shared.searchSources(query: query, title: title, numbering: numbering))
-        snapshots[Key(titleID: title.titleID, query: query, ordering: numbering?.ordering)] =
-            Snapshot(results: results, health: initialHealth(results), at: Date())
+    static func search(title: DetailsTarget, query: String, numbering: EpisodeNumbering? = nil,
+                       context original: SourceActionContext? = nil) async throws -> [SourceResult] {
+        let context = original ?? APIClient.shared.sourceContext()
+        let results = ordered(try await APIClient.shared.originalLegacySourceSearch(title: title, query: query, numbering: numbering, context: context))
+        try APIClient.shared.requireSourceContext(context); try Task.checkCancellation()
+        remember(title: title, query: query, numbering: numbering, results: results, context: context, expiresAt: Date().addingTimeInterval(maxAge))
         return results
+    }
+
+    static func retire(title: DetailsTarget, query: String, numbering: EpisodeNumbering?, context: SourceActionContext) {
+        let key = Key(titleID: title.titleID, query: query, ordering: numbering?.ordering, numberingID: numbering?.seriesId)
+        guard APIClient.shared.isCurrent(context), snapshots[key]?.context == context else { return }; snapshots[key] = nil
+    }
+
+    static func canExport(_ page: SourceFilterPage, loaded: Int) -> Bool {
+        !page.filters.active && page.nextCursor == nil && loaded == page.total
+    }
+
+    /// Only complete unfiltered views are exported. A filtered page or a first
+    /// finite page with a cursor is never advertised as the complete source set.
+    static func remember(title: DetailsTarget, query: String, numbering: EpisodeNumbering?, results: [SourceResult], context: SourceActionContext, expiresAt: Date, target: SourceFilterTarget? = nil) {
+        guard APIClient.shared.isCurrent(context), target == nil || (target?.titleId == title.titleID && target?.mediaType == (title.isMovie ? "movie" : "series")) else { return }
+        snapshots[Key(titleID: title.titleID, query: query, ordering: numbering?.ordering, numberingID: numbering?.seriesId)] =
+            Snapshot(results: results, health: initialHealth(results), at: Date(), context: context, expiresAt: expiresAt, target: target)
     }
 
     /// The results kept for this title / episode, if recent enough.
     static func recent(title: DetailsTarget, query: String, numbering: EpisodeNumbering? = nil,
                        now: Date = Date()) -> Snapshot? {
-        guard let snapshot = snapshots[Key(titleID: title.titleID, query: query, ordering: numbering?.ordering)],
-              now.timeIntervalSince(snapshot.at) < maxAge else { return nil }
+        guard let snapshot = snapshots[Key(titleID: title.titleID, query: query, ordering: numbering?.ordering, numberingID: numbering?.seriesId)],
+              now.timeIntervalSince(snapshot.at) < maxAge, now < snapshot.expiresAt, APIClient.shared.isCurrent(snapshot.context) else { return nil }
         return snapshot
     }
 
     /// Records a result's latest health (a resolved check or a probe), so the other list
     /// shows it too.
     static func updateHealth(title: DetailsTarget, query: String, numbering: EpisodeNumbering? = nil,
-                             index: Int, health: SourceHealth) {
-        snapshots[Key(titleID: title.titleID, query: query, ordering: numbering?.ordering)]?.health[index] = health
+                             index: Int, health: SourceHealth, context: SourceActionContext? = nil, snapshotID: String? = nil) {
+        let key = Key(titleID: title.titleID, query: query, ordering: numbering?.ordering, numberingID: numbering?.seriesId)
+        guard let snapshot = snapshots[key], APIClient.shared.isCurrent(snapshot.context), Date() < snapshot.expiresAt,
+              context == nil || context == snapshot.context, snapshot.results.first?.snapshotID == snapshotID else { return }
+        snapshots[key]?.health[index] = health
     }
 }

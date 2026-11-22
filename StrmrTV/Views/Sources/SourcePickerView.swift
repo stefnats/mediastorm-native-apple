@@ -14,11 +14,12 @@ struct SourcePickerView: View {
     let onPick: (SourceResult, ManualTrackPick?) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var results: [SourceResult] = []
-    @State private var isLoading = true
-    @State private var error: String?
-    /// Health / cache state by result index; pending rows are updated by the long-poll.
-    @State private var health: [Int: SourceHealth] = [:]
+    @StateObject private var filter: SourceFilterModel
+    @State private var filterControls = false
+    private var results: [SourceResult] { filter.rows.map(\.result) }
+    private var isLoading: Bool { filter.loading }
+    private var error: String? { filter.error }
+    private var health: [Int: SourceHealth] { filter.health }
     @State private var trackPreferences = ManualTrackPreferences()
     /// Track picks and probes by result index, kept for the visit (Expo `trackOverrides`).
     @State private var trackOverrides: [Int: ManualTrackOverrides] = [:]
@@ -27,6 +28,12 @@ struct SourcePickerView: View {
     @State private var tracksTarget: TracksTarget?
     /// A long press's release can also arrive as a Select; it is ignored until then.
     @State private var suppressSelectUntil = Date.distantPast
+
+    init(title: DetailsTarget, episode: Episode?, libraryVersions: [LibraryVersion] = [], onPickLibrary: @escaping (LibraryVersion) -> Void = { _ in }, contentPreference: ContentPreference?, onPick: @escaping (SourceResult, ManualTrackPick?) -> Void) {
+        self.title = title; self.episode = episode; self.libraryVersions = libraryVersions; self.onPickLibrary = onPickLibrary
+        self.contentPreference = contentPreference; self.onPick = onPick
+        _filter = StateObject(wrappedValue: SourceFilterModel(title: title, episode: episode))
+    }
 
     struct TracksTarget: Identifiable {
         let result: SourceResult
@@ -52,13 +59,15 @@ struct SourcePickerView: View {
                 }
                 .padding(.bottom, 24)
 
+                SourceFilterStatus(model: filter, controls: $filterControls)
                 if !libraryVersions.isEmpty {
                     Text(libraryVersions.count == 1 ? String(localized: "In your libraries")
                                                     : String(localized: "\(libraryVersions.count) in your libraries"))
                         .font(.callout.weight(.semibold)).foregroundStyle(.secondary)
                     ForEach(libraryVersions) { version in
                         Button {
-                            dismiss()
+                            guard filter.permitsLibrary else { return }
+                            filter.close(); dismiss()
                             onPickLibrary(version)
                         } label: {
                             LibraryVersionRow(version: version)
@@ -72,25 +81,28 @@ struct SourcePickerView: View {
                 if isLoading {
                     HStack(spacing: 24) {
                         ProgressView()
-                        Text("Searching sources…").foregroundStyle(.secondary)
+                        Text(filter.supported ? "Reading saved source view…" : "Searching sources…").foregroundStyle(.secondary)
                     }
                 } else if let error {
                     Text(error).foregroundStyle(.secondary)
                 } else if results.isEmpty {
                     Text("No sources found").foregroundStyle(.secondary)
                 } else {
-                    ForEach(results, id: \.index) { result in
+                    ForEach(filter.rows) { row in
+                        let result = row.result
                         Button {
-                            guard Date() >= suppressSelectUntil else { return }
-                            dismiss()
-                            onPick(result, pick(for: result))
+                            guard Date() >= suppressSelectUntil, let selected = filter.take(row) else { return }
+                            let tracks = pick(for: result); filter.close(); dismiss()
+                            onPick(selected, tracks)
                         } label: {
-                            SourceRow(result: result, health: health[result.index],
-                                      hasTrackPicks: !(trackOverrides[result.index]?.isEmpty ?? true))
+                            VStack(alignment: .leading, spacing: 6) {
+                                SourceRow(result: result, health: health[result.index], hasTrackPicks: !(trackOverrides[result.index]?.isEmpty ?? true))
+                                if filter.supported { Text(SourceFilterLabels.verdict(row.verdict, basis: filter.page?.filters.basis ?? "candidate")).font(.footnote).foregroundStyle(.secondary) }
+                            }
                         }
                         .buttonStyle(SourceRowStyle())
                         .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                            showTracks(result)
+                            showTracks(row)
                         })
                     }
                 }
@@ -101,8 +113,13 @@ struct SourcePickerView: View {
         }
         .scrollClipDisabled()
         .background { SourcePickerBackdrop(url: title.backdropURL) }
-        .onExitCommand { dismiss() }
+        .onExitCommand { filter.close(); dismiss() }
         .task { await load() }
+        .onDisappear { if tracksTarget == nil && !filterControls { filter.close() } }
+        .onChange(of: filter.page?.viewId) { probes = [:]; trackOverrides = [:] }
+        .onChange(of: filter.latestEvidence) { before, after in
+            for (index, evidence) in after where before[index]?.sourceVersion != evidence.sourceVersion { trackOverrides[index] = nil }
+        }
         .fullScreenCover(item: $tracksTarget) { target in
             let index = target.result.index
             SourceTracksView(
@@ -113,10 +130,13 @@ struct SourcePickerView: View {
                                    set: { trackOverrides[index] = $0 })
             ) { pick in
                 // Leave the track page, then the picker, then play.
+                guard let selected = filter.takeManual(target.result) else { return }
+                let admitted = filter.captureAdmission()
                 Task {
-                    try? await Task.sleep(for: .milliseconds(350))
-                    dismiss()
-                    onPick(target.result, pick)
+                    do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
+                    guard admitted(), !Task.isCancelled else { return }
+                    filter.close(); dismiss()
+                    onPick(selected, pick)
                 }
             }
         }
@@ -125,19 +145,16 @@ struct SourcePickerView: View {
     // MARK: Tracks
 
     /// Long press: probe the source and list its tracks (the Expo TV track modal).
-    private func showTracks(_ result: SourceResult) {
+    private func showTracks(_ row: SourceFilterRow) {
+        guard let result = filter.beginManual(row) else { return }
         suppressSelectUntil = Date().addingTimeInterval(1.5)
-        SourceTracksModel.log.notice("long press: \(result.serviceType) \"\(result.title)\" (cached probe \(probes[result.index] != nil))")
         tracksTarget = TracksTarget(result: result)
     }
 
-    /// Keeps a probe with tracks for the visit and shows its outcome on the row.
     private func record(_ probe: SourceTrackProbe, for result: SourceResult) {
+        guard result.filterSelection?.current == true else { return }
         if !probe.audio.isEmpty || !probe.subtitles.isEmpty { probes[result.index] = probe }
-        let debrid = result.serviceType.lowercased() == "debrid"
-        let state = probe.playable ? (debrid ? "cached" : "healthy") : (debrid ? "not_cached" : "unhealthy")
-        health[result.index] = SourceHealth(state: state, token: nil)
-        SourceSearch.updateHealth(title: title, query: query, numbering: numbering, index: result.index, health: SourceHealth(state: state, token: nil))
+        filter.recordProbe(result, probe: probe)
     }
 
     /// The picks made for `result` this visit, which a plain Select also plays with (as Expo).
@@ -147,49 +164,15 @@ struct SourcePickerView: View {
         return ManualTrackPick(overrides: overrides, audio: probe.audio, subtitles: probe.subtitles)
     }
 
-    /// The search query, shared with the player's Switch Source (`SourceSearch`).
-    private var query: String {
-        SourceSearch.query(name: title.name, year: title.year,
-                           episode: episode.map { ($0.seasonNumber, $0.episodeNumber) })
-    }
-
-    private var numbering: EpisodeNumbering? { episode?.numbering }
-
     private func load() async {
-        Task { trackPreferences = await ManualTrackPreferences.current(content: contentPreference) }
+        filter.appear()
+        guard filter.current else { return }
         do {
-            // Kept for Switch Source, which shows these in the same order.
-            results = try await SourceSearch.search(title: title, query: query, numbering: numbering)
-            health = SourceSearch.initialHealth(results)
-        } catch {
-            self.error = error.localizedDescription
-        }
-        isLoading = false
-        await resolvePendingHealth()
+            let preferences = try await ManualTrackPreferences.current(content: contentPreference, context: filter.context)
+            guard filter.current else { return }; trackPreferences = preferences
+        } catch { filter.preferenceFailed(error) }
     }
 
-    /// Long-polls each pending check until it completes, applying results by index.
-    private func resolvePendingHealth() async {
-        let tokens = Set(health.values.filter { $0.state == "pending" }.compactMap(\.token))
-        for token in tokens {
-            var complete = false
-            while !complete, !Task.isCancelled {
-                guard let snapshot = try? await APIClient.shared.sourceHealth(token: token) else { break }
-                for entry in snapshot.results {
-                    health[entry.index] = entry.health
-                    SourceSearch.updateHealth(title: title, query: query, numbering: numbering, index: entry.index, health: entry.health)
-                }
-                complete = snapshot.complete
-            }
-        }
-        // Anything still pending (poll failed or token expired) stops spinning.
-        if !Task.isCancelled {
-            for (index, h) in health where h.state == "pending" {
-                health[index] = SourceHealth(state: "unknown", token: nil)
-                SourceSearch.updateHealth(title: title, query: query, numbering: numbering, index: index, health: SourceHealth(state: "unknown", token: nil))
-            }
-        }
-    }
 }
 
 /// Full-width row that highlights on focus, like a grouped list row (also the subtitle search list).
