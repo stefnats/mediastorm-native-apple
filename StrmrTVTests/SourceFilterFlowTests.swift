@@ -18,20 +18,34 @@ final class SourceFilterFixtureAPI: SourceFilterAPI {
     var holdPages = false
     var holdSearch = false
     var holdProbe = false
-    var pending: [Int: CheckedContinuation<SourceFilterPage, Error>] = [:]
-    var pendingSearch: CheckedContinuation<SourceFilterReply, Error>?
+    var pending: [Int: CheckedContinuation<Void, Error>] = [:]
+    var pendingSearch: CheckedContinuation<Void, Error>?
     var pendingProbe: CheckedContinuation<SourceTrackProbe, Error>?
+    private var completedPages: [Int: SourceFilterPage] = [:]
+    private var completedSearches: [Int: SourceFilterReply] = [:]
+    private var pendingSearchIndex: Int?
     init() throws { initial = .supported(try SourceFilterFixture.page()) }
     func sourceContext() -> SourceActionContext { context }
     func isCurrent(_ context: SourceActionContext) -> Bool { self.context == context }
     func sourceFilterSearch(title: DetailsTarget, episode: Episode?, context: SourceActionContext) async throws -> SourceFilterReply {
         searches += 1; if let searchError { throw searchError }
-        if holdSearch { return try await withCheckedThrowingContinuation { pendingSearch = $0 } }; return initial
+        if holdSearch {
+            let index = searches
+            pendingSearchIndex = index
+            try await withCheckedThrowingContinuation { (gate: CheckedContinuation<Void, Error>) in pendingSearch = gate }
+            guard let reply = completedSearches.removeValue(forKey: index) else { throw SourceFilterFailure.invalid }
+            return reply
+        }
+        return initial
     }
     func sourceFilterPage(snapshot: String, filters: SourceFilters, cursor: String?, context: SourceActionContext) async throws -> SourceFilterPage {
         let index = reads.count; reads.append(Read(snapshot: snapshot, filters: filters, cursor: cursor, context: context))
         if let pageError { throw pageError }
-        if holdPages { return try await withCheckedThrowingContinuation { pending[index] = $0 } }
+        if holdPages {
+            try await withCheckedThrowingContinuation { (gate: CheckedContinuation<Void, Error>) in pending[index] = gate }
+            guard let page = completedPages.removeValue(forKey: index) else { throw SourceFilterFailure.invalid }
+            return page
+        }
         return pages.isEmpty ? try SourceFilterFixture.page(filters: filters, view: "applied-view") : pages.removeFirst()
     }
     func sourceFilterHealth(token: String, context: SourceActionContext) async throws -> SourceHealthSnapshot {
@@ -41,7 +55,19 @@ final class SourceFilterFixtureAPI: SourceFilterAPI {
         probes += 1; if let probeError { throw probeError }
         if holdProbe { return try await withCheckedThrowingContinuation { pendingProbe = $0 } }; return SourceFilterFixture.probe()
     }
-    func finish(_ index: Int, _ page: SourceFilterPage) { pending.removeValue(forKey: index)?.resume(returning: page) }
+    // Only the Void signal crosses the continuation boundary. Reference-bearing
+    // replies stay on this actor until the original held operation consumes them.
+    func finish(_ index: Int, _ page: SourceFilterPage) {
+        guard let gate = pending.removeValue(forKey: index) else { return }
+        completedPages[index] = page
+        gate.resume()
+    }
+    func finishSearch(_ reply: SourceFilterReply) {
+        guard let index = pendingSearchIndex, let gate = pendingSearch else { return }
+        pendingSearch = nil; pendingSearchIndex = nil
+        completedSearches[index] = reply
+        gate.resume()
+    }
 }
 
 @MainActor
@@ -83,7 +109,7 @@ final class SourceFilterFlowTests: XCTestCase {
         let model = SourceFilterModel(title: try SourceFilterFixture.title(), episode: nil, api: api, now: { SourceFilterFixture.now }); defer { model.close() }
         model.appear(); await until { api.pendingSearch != nil }
         api.context = StoredMediaFixture.context("replacement")
-        api.pendingSearch?.resume(returning: .supported(try SourceFilterFixture.page())); api.pendingSearch = nil
+        api.finishSearch(.supported(try SourceFilterFixture.page()))
         await until { !model.loading }; model.reload()
         XCTAssertTrue(model.rows.isEmpty); XCTAssertEqual(api.searches, 1); XCTAssertFalse(model.current)
     }
