@@ -12,7 +12,7 @@ final class PostPlayModel: ObservableObject {
     private var questionDismissed = false
     private var questionOffered = false
     private var listTasks: [UUID: Task<Void, Never>] = [:]
-    private var navigating = false
+    private var navigationOwner: UUID?
     @Published private(set) var title: Title?
     @Published private(set) var rating: PersonalTitleRating?
     @Published private(set) var loading = false
@@ -37,7 +37,7 @@ final class PostPlayModel: ObservableObject {
         let ended = stamp?.orderingKnown == true && stamp?.upcoming == nil && ["ended", "canceled", "cancelled"].contains(lifecycle?.lowercased() ?? "")
         return ended ? "Series finished" : "Episode finished"
     }
-    func close() { closed = true; generation += 1; task?.cancel(); listTasks.values.forEach { $0.cancel() }; suggestions = []; loading = false; saving = false; suggestionsLoading = false; listSaving = [] }
+    func close() { navigationOwner = nil; closed = true; generation += 1; task?.cancel(); listTasks.values.forEach { $0.cancel() }; suggestions = []; loading = false; saving = false; suggestionsLoading = false; listSaving = [] }
     private func check(_ owner: Int) throws {
         try Task.checkCancellation(); guard current, owner == generation else { throw CancellationError() }
     }
@@ -45,7 +45,7 @@ final class PostPlayModel: ObservableObject {
         guard current, !loading, !saving, listSaving.isEmpty else { return }
         guard offer.completion != nil else { error = offer.failure ?? PostPlayFailure.completion.localizedDescription; return }
         generation += 1; let owner = generation
-        task?.cancel(); loading = true; error = nil; rating = nil; question = false; suggestions = []; suggestionsSource = nil; navigating = false
+        task?.cancel(); loading = true; error = nil; rating = nil; question = false; suggestions = []; suggestionsSource = nil; navigationOwner = nil
         task = Task { [weak self] in
             guard let self else { return }
             defer { if owner == generation { loading = false; task = nil } }
@@ -104,7 +104,7 @@ final class PostPlayModel: ObservableObject {
     }
     private func contains(_ row: PostPlaySuggestion) -> Bool { current && !loading && !saving && suggestions.contains { $0 === row } }
     func details(_ row: PostPlaySuggestion) -> DetailsTarget? {
-        guard contains(row), !navigating else { return nil }; return DetailsTarget(row.title)
+        guard contains(row), navigationOwner == nil else { return nil }; return DetailsTarget(row.title)
     }
     func reminder() -> ReminderSubject? {
         guard current, let title, ReleaseBadge.forEpisode(airDate: offer.request.postPlayStamp?.upcoming?.airedDate) != nil else { return nil }
@@ -141,9 +141,12 @@ final class PostPlayModel: ObservableObject {
         }
     }
     func preparePlay(_ row: PostPlaySuggestion) async throws -> PlaybackRequest {
-        guard contains(row), !navigating else { throw CancellationError() }
-        let owner = generation; navigating = true
-        defer { if current && owner == generation { navigating = false } }
+        guard contains(row), navigationOwner == nil else { throw CancellationError() }
+        let owner = generation, navigation = UUID()
+        navigationOwner = navigation
+        // A refreshed generation rejects the old result, but its actual lookup
+        // still releases its own admission. It cannot clear a replacement's.
+        defer { if navigationOwner == navigation { navigationOwner = nil } }
         let bundle = try await api.postPlayDetails(row.title, context: offer.context)
         try check(owner); guard contains(row) else { throw CancellationError() }
         let title: Title

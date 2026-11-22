@@ -10,6 +10,9 @@ final class PostPlayFixtureAPI: PostPlayAPI {
     var suggestionsSource = "personalized"
     var suggestionsReply: PostPlaySuggestionsReply?
     var detailsReply: DetailsBundle?
+    var holdDetails = false
+    var pendingDetails: [Int: CheckedContinuation<DetailsBundle, Error>] = [:]
+    private var detailsIndex = 0
     var contextError: Error?
     var suggestionsError: Error?
     var ratingError: Error?
@@ -47,6 +50,10 @@ final class PostPlayFixtureAPI: PostPlayAPI {
     func postPlayContains(_ title: Title, context: SourceActionContext) async throws -> Bool { calls.append("contains:" + title.id); return member }
     func postPlayDetails(_ title: Title, context: SourceActionContext) async throws -> DetailsBundle {
         calls.append("details:" + title.id)
+        if holdDetails {
+            let index = detailsIndex; detailsIndex += 1
+            return try await withCheckedThrowingContinuation { pendingDetails[index] = $0 }
+        }
         if let detailsReply { return detailsReply }
         return try PostPlayFixture.decode(["movieDetails": ["id": title.id, "name": title.name, "mediaType": title.mediaType, "tmdbId": title.tmdbId ?? 0], "resume": ["position": 30, "duration": 120, "percent": 25, "eligible": true]])
     }
