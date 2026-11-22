@@ -4,7 +4,7 @@ import SwiftUI
 /// recommendations and custom-list rows, without replacing their navigation.
 @MainActor
 struct PersonalToolsView: View {
-    private enum Tool { case loved, taste, reminders }
+    private enum Tool { case loved, taste, reminders, rooms }
     private struct Presentation: Identifiable {
         let id = UUID()
         let tool: Tool
@@ -16,6 +16,7 @@ struct PersonalToolsView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Personal").font(.headline)
             Button { open(.loved) } label: { Label("Loved titles", systemImage: "heart.fill") }
+            Button { open(.rooms) } label: { Label("Watch Together", systemImage: "person.2") }
             Button { open(.taste) } label: { Label("Starting interests", systemImage: "sparkles") }
             if AppSession.shared.profile?.isKidsProfile == false {
                 Button { open(.reminders) } label: { Label("Reminders & Inbox", systemImage: "bell") }
@@ -40,6 +41,7 @@ struct PersonalToolsView: View {
                         #else
                         ListPage(list: list)
                         #endif
+                    case .rooms: WatchRoomsView(context: item.context)
                     case .taste: TasteSetupView(context: item.context)
                     case .reminders: RemindersNavigationView(context: item.context)
                     }
