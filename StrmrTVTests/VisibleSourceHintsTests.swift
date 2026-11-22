@@ -36,7 +36,7 @@ final class VisibleSourceHintsTests: XCTestCase {
     private func record(_ coordinate: VisibleSourceCoordinate, id: UUID = UUID(), x: Double = 0, y: Double = 0, order: Int = 0) -> VisibleSourceRecord {
         .init(id:id,coordinate:coordinate,rect:CGRect(x:x,y:y,width:60,height:90),order:order)
     }
-    private func until(_ predicate: () -> Bool) async { for _ in 0..<1000 { if !predicate() { await Task.yield() } } }
+    private func until(_ predicate: () -> Bool) async { for _ in 0..<1000 where !predicate() { await Task.yield() } }
     private func makeOwner(_ api: SourceHintsFixtureAPI, wait: ((Duration) async throws -> Void)? = nil) -> VisibleSourceHints {
         VisibleSourceHints(context:api.context,api:api,viewID:"test_view",coalesce:.zero,wait:wait ?? { duration in
             if duration == .zero { await Task.yield() } else { try await Task.sleep(for:.seconds(3600)) }

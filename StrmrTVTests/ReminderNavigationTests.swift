@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor
 final class ReminderNavigationTests: XCTestCase {
-    private func until(_ predicate: () -> Bool) async { for _ in 0..<1000 { if !predicate() { await Task.yield() } } }
+    private func until(_ predicate: () -> Bool) async { for _ in 0..<1000 where !predicate() { await Task.yield() } }
     func testActualInboxDestinationOnlyRequestsBrowsingWithoutPrewarmOrAutoplay() async throws {
         let api = try ReminderFixtureAPI(), model = RemindersModel(context: api.context, api: api)
         model.load(); await until { !model.busy }

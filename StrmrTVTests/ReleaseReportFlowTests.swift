@@ -58,7 +58,7 @@ final class ReleaseReportFlowTests: XCTestCase {
             continuation?.resume()
         }
         func until(_ predicate: () -> Bool) async {
-            for _ in 0..<1000 { if !predicate() { await Task.yield() } }
+            for _ in 0..<1000 where !predicate() { await Task.yield() }
         }
     }
 
