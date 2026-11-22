@@ -8,6 +8,7 @@ extension MobileDetailsView {
     var actionsSection: some View {
         VStack(spacing: 18) {
             primaryRow
+            ContentLocalPreferenceView(target: target)
             HStack(alignment: .top, spacing: 4) {
                 MobileActionItem(caption: String(localized: "Sources")) {
                     Button { model.chooseSource(for: model.activeEpisode) } label: {

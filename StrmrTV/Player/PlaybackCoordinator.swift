@@ -53,19 +53,91 @@ final class PlaybackCoordinator: ObservableObject {
 
     /// Plays through the prequeue. `picks`, made on details for the stream its prequeue
     /// resolved, are laid over the server's selection when Play resolves that same stream.
-    /// A movie or episode with a library copy plays that instead (`playLibrary`).
+    /// Explicit Versions picks play their file; automatic library choices honor
+    /// the server's source-preference capability before using the prequeue.
     func play(_ request: PlaybackRequest, picks: PrequeuePick? = nil) {
-        if let version = request.preferredLibraryVersion { return playLibrary(request, version: version) }
+        if let explicit = request.libraryVersion { return playLibrary(request, version: explicit) }
+        guard let legacyCopy = request.preferredLibraryVersion else { return playPrequeue(request, picks: picks) }
+        guard resolving == nil else { return }
+        let context = api.sourceContext()
+        let id = UUID()
+        resolveID = id
+        resolving = request
+        resolvingStage = String(localized: "Checking source preference…")
+        resolveTask = Task { [self] in
+            do {
+                let preference = try await api.contentLocalPreference(request.title.titleID, context: context)
+                try Task.checkCancellation()
+                guard resolveID == id, api.isCurrent(context) else { return finishResolve(id) }
+                finishResolve(id)
+                if preference.supported {
+                    // The server resolves the complete profile/title/episode hierarchy.
+                    // A client-side best-file shortcut would ignore Search First.
+                    var serverOrdered = request
+                    serverOrdered.library = nil
+                    playPrequeue(serverOrdered, picks: picks)
+                } else {
+                    playLibrary(request, version: legacyCopy)
+                }
+            } catch {
+                guard !Task.isCancelled, resolveID == id else { return }
+                finishResolve(id)
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func playPrequeue(_ request: PlaybackRequest, picks: PrequeuePick?) {
+        let original = api.sourceContext()
         begin(request, stage: String(localized: "Searching…")) { [self] in
             let resolved = try await resolveStream(request)
+            guard original.sameViewer(as: api.sourceContext()) else {
+                throw APIError.notReady("Profile or connection changed during source preparation")
+            }
             guard let path = resolved.streamPath else { throw APIError.notReady("Stream resolved without a path") }
             await TrackSettingsStore.shared.loadIfNeeded()
-            let current = SourceSwitch.Current(resolved, path: path)
+            guard original.sameViewer(as: api.sourceContext()) else {
+                throw APIError.notReady("Profile or connection changed during source preparation")
+            }
+            let current = SourceSwitch.Current(resolved, path: path, context: api.sourceContext())
             // Another stream (another episode, or a re-resolve) takes the picks by intent.
             if let pick = picks?.pick(for: resolved), !pick.overrides.isEmpty {
                 return (path, pick.preferences(over: resolved.trackSelection), current)
             }
             return (path, TrackPreferences.overridden(resolved) ?? TrackPreferences(resolved), current)
+        }
+    }
+
+    /// Explicit replacement only: polling never starts another preparation or
+    /// silently falls back to a different source if this one fails.
+    func playReportedAlternative(_ request: PlaybackRequest, id: String,
+                                 context: SourceActionContext, carry: TrackCarry) {
+        guard resolving == nil, api.isCurrent(context) else {
+            discardReportedAlternative(id, context: context)
+            return
+        }
+        begin(request, stage: String(localized: "Preparing alternative…"), carry: carry) { [self] in
+            do {
+                let resolved = try await awaitPrequeue(id, expecting: request.episode, context: context)
+                if request.episode == nil, resolved.targetEpisode != nil {
+                    throw APIError.notReady("The alternative belongs to another episode")
+                }
+                guard let path = resolved.streamPath else { throw APIError.notReady("Alternative has no stream") }
+                var source = SourceSwitch.Current(resolved, path: path, context: context)
+                source.reportContext = context
+                return (path, TrackPreferences(resolved), source)
+            } catch {
+                let cleanup = Task { try await api.cancelReleaseReplacement(id, context: context) }
+                _ = try? await cleanup.value
+                throw error
+            }
+        }
+    }
+
+    private func discardReportedAlternative(_ id: String, context: SourceActionContext) {
+        Task { [self] in
+            do { try await api.cancelReleaseReplacement(id, context: context) }
+            catch { if api.isCurrent(context) { errorMessage = String(localized: "The alternative cancellation could not be confirmed.") } }
         }
     }
 
@@ -117,13 +189,26 @@ final class PlaybackCoordinator: ObservableObject {
                 if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
                 #endif
                 let (path, tracks, source) = try await resolve()
+                var transferred = false
+                defer {
+                    if !transferred, let context = source.reportContext, let id = source.prequeueID {
+                        discardReportedAlternative(id, context: context)
+                    }
+                }
                 try Task.checkCancellation()
                 guard resolveID == id else { return }
                 guard let engine else { return finishResolve(id) }
                 resolvingStage = String(localized: "Starting…")
                 resolvingDetail = nil
-                presentPlayer(engine: engine, request: request, path: path, tracks: tracks, source: source,
-                              carry: carry, previewsEnabled: await previews) { self.finishResolve(id) }
+                let showPreviews = await previews
+                try Task.checkCancellation()
+                guard resolveID == id else { return }
+                if let original = source.prequeueContext, !original.sameViewer(as: api.sourceContext()) {
+                    throw APIError.notReady("Profile or connection changed before playback")
+                }
+                if let context = source.reportContext { try api.requireSourceContext(context) }
+                transferred = presentPlayer(engine: engine, request: request, path: path, tracks: tracks, source: source,
+                                             carry: carry, previewsEnabled: showPreviews) { self.finishResolve(id) }
             } catch is CancellationError {
                 finishResolve(id)
             } catch {
@@ -324,11 +409,14 @@ final class PlaybackCoordinator: ObservableObject {
 
     /// Polls a prequeue until its stream is ready. With `episode`, gives up straight away if the
     /// prequeue is resolving a different one.
-    private func awaitPrequeue(_ id: String, expecting episode: PlaybackRequest.EpisodeInfo? = nil) async throws -> PrequeueStatus {
+    private func awaitPrequeue(_ id: String, expecting episode: PlaybackRequest.EpisodeInfo? = nil,
+                               context: SourceActionContext? = nil) async throws -> PrequeueStatus {
         let deadline = Date().addingTimeInterval(180)
         while Date() < deadline {
             try Task.checkCancellation()
-            let status = try await api.prequeueStatus(id)
+            let status: PrequeueStatus
+            if let context { status = try await api.releaseReplacementStatus(id, context: context) }
+            else { status = try await api.prequeueStatus(id) }
             if let episode, status.targetEpisode?.seasonNumber != episode.season
                 || status.targetEpisode?.episodeNumber != episode.episode {
                 throw APIError.notReady("Prequeue is for a different episode")
@@ -379,9 +467,10 @@ final class PlaybackCoordinator: ObservableObject {
     /// (or right away when there is nothing to present on).
     private func presentPlayer(engine: AetherEngine, request: PlaybackRequest, path: String,
                                tracks: TrackPreferences, source: SourceSwitch.Current, carry: TrackCarry?,
-                               previewsEnabled: Bool, completion: @escaping () -> Void) {
-        if castClaims(request, path: path, tracks: tracks) { return completion() }
-        guard let presenter = Self.topViewController() else { return completion() }
+                               previewsEnabled: Bool, completion: @escaping () -> Void) -> Bool {
+        // This replacement owner is the native player, not an external Cast session.
+        if source.reportContext == nil, castClaims(request, path: path, tracks: tracks) { completion(); return true }
+        guard let presenter = Self.topViewController() else { completion(); return false }
         let metadata = request.streamMetadata(path: path).merging(source.trackerQuery) { _, new in new }
         let url = api.streamURL(for: path, metadata: metadata)
         let player = PlayerViewController(engine: engine, request: request, url: url,
@@ -389,6 +478,7 @@ final class PlaybackCoordinator: ObservableObject {
         player.currentSource = source
         player.trackCarry = carry
         presenter.present(player, animated: true, completion: completion)
+        return true
     }
 
     private static func topViewController() -> UIViewController? {

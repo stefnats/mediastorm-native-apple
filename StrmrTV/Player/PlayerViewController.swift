@@ -90,6 +90,7 @@ final class PlayerViewController: EnginePlayerViewController {
     var currentSource = SourceSwitch.Current()
     var trackCarry: TrackCarry?
     var sourceList: SourceSwitchList?
+    var releaseReportModel: ReleaseReportModel?
     var autoSwitchState = AutoSwitchState()
 
     // Audio menu state.
@@ -324,6 +325,17 @@ final class PlayerViewController: EnginePlayerViewController {
         thumbnails.cancel()
         onlineSubtitles.cancel()
         sourceList?.cancel()
+        releaseReportModel?.close()
+        if let context = currentSource.reportContext, let id = currentSource.prequeueID {
+            Task {
+                do { try await APIClient.shared.cancelReleaseReplacement(id, context: context) }
+                catch {
+                    if APIClient.shared.isCurrent(context) {
+                        PlaybackCoordinator.shared.errorMessage = String(localized: "The alternative cancellation could not be confirmed.")
+                    }
+                }
+            }
+        }
         subtitleStatus.hide()
         #if os(iOS)
         stopMobileControls()

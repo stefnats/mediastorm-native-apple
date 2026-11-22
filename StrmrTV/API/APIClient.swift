@@ -232,6 +232,21 @@ final class APIClient: ObservableObject {
         return comps.url!
     }
 
+    /// A source-bound mutation/cleanup is sent once with its captured request.
+    /// No refresh, PIN adoption, transport rebase or application-level replay.
+    /// A lost acknowledgement stays unknown; the caller must not resubmit it.
+    func sendOriginalSourceAction(_ request: URLRequest) async throws -> Data {
+        let (data, response) = try await Self.http.data(for: request)
+        guard let response = response as? HTTPURLResponse else {
+            throw APIError.notReady("The server response could not be confirmed")
+        }
+        guard (200..<300).contains(response.statusCode) else {
+            throw APIError.http(HTTPFailure(status: response.statusCode, data: data,
+                                            headers: response.allHeaderFields))
+        }
+        return data
+    }
+
     private func perform(_ req: URLRequest, retried: Bool = false) async throws -> Data {
         let data: Data, response: URLResponse
         do {

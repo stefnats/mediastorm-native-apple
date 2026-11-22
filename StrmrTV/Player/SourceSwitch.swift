@@ -6,6 +6,11 @@ import Foundation
 enum SourceSwitch {
     /// What the player is playing: the source picked by hand, or the release the prequeue chose.
     struct Current: Equatable {
+        var prequeueID: String?
+        var prequeueContext: SourceActionContext?
+        /// A report replacement keeps its exact original cleanup credentials.
+        /// Ordinary source switches never acquire this ownership implicitly.
+        var reportContext: SourceActionContext?
         var guid: String?
         var releaseName: String?
         var streamPath: String?
@@ -147,8 +152,8 @@ struct TrackCarry: Equatable {
 
 extension SourceSwitch.Current {
     /// The release the prequeue resolved to `path`.
-    init(_ resolved: PrequeueStatus, path: String) {
-        self.init(releaseName: resolved.releaseTitle, streamPath: path, origin: resolved.sourceLabel,
+    init(_ resolved: PrequeueStatus, path: String, context: SourceActionContext? = nil) {
+        self.init(prequeueID: resolved.prequeueId, prequeueContext: context, releaseName: resolved.releaseTitle, streamPath: path, origin: resolved.sourceLabel,
                   serviceType: resolved.resolvedServiceType, debridProvider: resolved.resolvedDebridProvider)
     }
 

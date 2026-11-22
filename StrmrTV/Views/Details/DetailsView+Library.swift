@@ -1,9 +1,8 @@
 import SwiftUI
 
-/// The title's copies in the profile's local, Plex and Jellyfin libraries, which win over the
-/// prequeue: Play plays a single copy straight away and asks which one when there are several
-/// (with Stream Instead), as the Expo app does. Versions lists every copy, and Choose Source
-/// lists them above the stream results.
+/// The title's local, Plex and Jellyfin copies. Versions is an explicit manual
+/// choice; ordinary Play delegates ordering to a supporting server's preference.
+/// Older servers retain the coordinator's best-library fallback.
 extension DetailsView {
     struct VersionsTarget: Identifiable {
         let episode: Episode?
@@ -48,9 +47,8 @@ extension DetailsView {
         libraryVersions(for: target.isMovie ? nil : primaryEpisode)
     }
 
-    /// Play, through the library when it has the movie or episode: one copy plays, several
-    /// open the list to pick from. A press while the lookup is still running waits for it, so a
-    /// library title never starts a search by mistake.
+    /// Finish the existing library lookup before ordinary Play chooses server
+    /// ordering or the older server's best-library fallback.
     func playPreferringLibrary(_ episode: Episode?, from start: StartPoint?) {
         guard libraryVersions == nil, let lookup = libraryLookup else {
             return playOrAsk(episode, from: start, library: libraryVersions)
@@ -59,12 +57,6 @@ extension DetailsView {
     }
 
     private func playOrAsk(_ episode: Episode?, from start: StartPoint?, library: LibraryVersions?) {
-        let copies = target.isMovie || episode != nil
-            ? library?.versions(season: episode?.seasonNumber, episode: episode?.episodeNumber) ?? [] : []
-        if copies.count > 1 {
-            versionsPicker = VersionsTarget(episode: episode, play: PlayIntent(start: start))
-            return
-        }
         var request = request(episode, from: start)
         request.library = library
         playback.play(request, picks: prequeuePick)

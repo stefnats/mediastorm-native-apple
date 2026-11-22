@@ -65,6 +65,7 @@ extension DetailsView {
                     .focused($focus, equals: .action(.lists))
             }
             if buttons.inRow(.watched) { watchedButton }
+            ContentLocalPreferenceView(target: target)
             moreMenu
         }
     }

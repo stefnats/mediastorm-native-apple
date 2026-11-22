@@ -246,8 +246,8 @@ final class MobileDetailsModel: ObservableObject {
                             start: start, seed: artSeed, library: libraryVersions)
     }
 
-    /// Play, through the library when it has the movie or episode: one copy plays, several
-    /// open Versions. A tap while the lookup still runs waits for it.
+    /// Finish the library lookup, then let the coordinator respect server
+    /// source ordering. Explicit Versions choices remain separate.
     func play(_ episode: Episode?, from start: StartPoint?) {
         guard libraryVersions == nil, let lookup = libraryLookup else {
             return playOrAsk(episode, from: start, library: libraryVersions)
@@ -256,12 +256,6 @@ final class MobileDetailsModel: ObservableObject {
     }
 
     private func playOrAsk(_ episode: Episode?, from start: StartPoint?, library: LibraryVersions?) {
-        let copies = target.isMovie || episode != nil
-            ? library?.versions(season: episode?.seasonNumber, episode: episode?.episodeNumber) ?? [] : []
-        if copies.count > 1 {
-            versionsPicker = VersionsTarget(episode: episode, play: PlayIntent(start: start))
-            return
-        }
         var request = request(episode, from: start)
         request.library = library
         playback.play(request, picks: prequeuePick)

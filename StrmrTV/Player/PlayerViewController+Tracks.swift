@@ -167,9 +167,9 @@ extension PlayerViewController {
     private func settingsMenuExtras() -> [UIMenuElement] {
         #if os(iOS)
         // A downloaded file is the one copy on the device: nothing to switch to.
-        return (playsDownload ? [] : [switchSourceAction()]) + [audioOffsetItem] + mobileSettingsExtras()
+        return (playsDownload ? [] : [switchSourceAction(), releaseReportAction()]) + [audioOffsetItem] + mobileSettingsExtras()
         #else
-        return [switchSourceAction(), audioOffsetItem]
+        return [switchSourceAction(), releaseReportAction(), audioOffsetItem]
         #endif
     }
 
