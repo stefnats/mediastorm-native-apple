@@ -40,7 +40,9 @@ struct ContentArtworkView: View {
                 if model.busy { ProgressView() }
                 if let message = model.message { Text(message).foregroundStyle(.secondary) }
                 if let confirmation = model.confirmation { Text(confirmation).foregroundStyle(.secondary) }
-                if !model.busy, model.preference == nil {
+                if !model.busy, model.needsGalleryReload {
+                    Button("Reload title pictures") { operation = Task { await model.reloadGallery() } }
+                } else if !model.busy, model.preference == nil {
                     Button("Reload saved pictures") { operation = Task { await model.load() } }
                 }
                 Button("Done") { dismiss() }
