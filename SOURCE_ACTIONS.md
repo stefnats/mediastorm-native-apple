@@ -43,7 +43,12 @@ branch. Manual dispatch requires a reviewed immutable commit; a branch push pins
 its actual commit. The job records actual tools, requires Xcode 27 and Swift 6.4+
 (as required by the pinned AetherEngine 7.47.0 release), generates the actual Xcode project,
 selects an installed available tvOS 18+ Apple TV simulator, runs `StrmrTVTests`, and
-compiles `StrmrMobile` for the iOS simulator. It preserves logs and the xcresult.
+compiles `StrmrMobile` for the selected installed iPhone simulator. The iOS
+build and unit suite use that simulator's active architecture. The actual resolved
+application build settings are retained and required to select arm64. The inherited
+IrohBridge framework provides an arm64 simulator slice, matching this arm64
+runner; this job does not claim Intel simulator compatibility. It preserves
+logs and the xcresult.
 It does not publish apps, install on real devices, create releases or push source.
 After successful environment preparation, the iOS build also runs when tvOS
 fails, so one platform cannot hide the other platform's compiler findings.

@@ -102,10 +102,20 @@ jobs:
         run: |
           set -euo pipefail
           export TMPDIR="$GITHUB_WORKSPACE/.build/temporary"
+          xcodebuild -showBuildSettings -project StrmrTV.xcodeproj -scheme StrmrMobile \
+            -destination "$(cat artifacts/ios-unit-destination.txt)" \
+            ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO -json > artifacts/ios-build-settings.json
+          python3 - <<'PYCODE'
+          import json,pathlib
+          targets=json.loads(pathlib.Path('artifacts/ios-build-settings.json').read_text())
+          settings=[item['buildSettings'] for item in targets if item.get('target') == 'StrmrMobile']
+          assert len(settings) == 1, 'Expected exactly one actual iOS application target'
+          assert settings[0]['ARCHS'].split() == ['arm64'], 'The inherited Iroh simulator framework requires arm64'
+          PYCODE
           xcodebuild build -project StrmrTV.xcodeproj -scheme StrmrMobile \
-            -destination 'generic/platform=iOS Simulator' \
+            -destination "$(cat artifacts/ios-unit-destination.txt)" \
             -derivedDataPath .build/derived-data \
-            CODE_SIGNING_ALLOWED=NO 2>&1 | tee artifacts/ios-build.log
+            ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO 2>&1 | tee artifacts/ios-build.log
       - name: Run hosted iPhone shared unit suite
         if: ${{ !cancelled() && steps.prepare.outcome == 'success' && steps.ios_build.outcome == 'success' }}
         run: |
@@ -116,7 +126,7 @@ jobs:
             -derivedDataPath .build/derived-data \
             -resultBundlePath artifacts/LiveAdmission-iOS.xcresult \
             -only-testing:StrmrMobileTests -parallel-testing-enabled NO \
-            CODE_SIGNING_ALLOWED=NO 2>&1 | tee artifacts/ios-unit-xctest.log
+            ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO 2>&1 | tee artifacts/ios-unit-xctest.log
       - name: Preserve actual logs and XCTest results
         if: always()
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0, Node 24
