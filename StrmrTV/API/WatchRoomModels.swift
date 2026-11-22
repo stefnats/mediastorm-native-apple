@@ -95,7 +95,7 @@ struct WatchRoomTarget: Equatable {
               title.isMovie == (episode == nil) else { throw WatchRoomError.unavailable }
         if let episode {
             guard (0...99999).contains(episode.season), (1...99999).contains(episode.episode),
-                  episode.numbering?.ordering == nil || episode.numbering?.ordering == "" || episode.numbering?.ordering == "default" else { throw WatchRoomError.unavailable }
+                  episode.numbering?.ordering == nil || episode.numbering?.ordering == "" || episode.numbering?.ordering == "default" || episode.numbering?.ordering == "official" else { throw WatchRoomError.unavailable }
         }
         self.title = title; season = episode?.season; self.episode = episode?.episode; episodeName = episode?.name
     }

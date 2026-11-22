@@ -66,6 +66,7 @@ extension DetailsView {
             }
             if buttons.inRow(.watched) { watchedButton }
             ContentLocalPreferenceView(target: target)
+            WatchTogetherButton(title: target, episode: primaryTarget?.episode)
             moreMenu
         }
     }

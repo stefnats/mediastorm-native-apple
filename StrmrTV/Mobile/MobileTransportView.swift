@@ -26,6 +26,8 @@ final class MobileTransportView: UIView {
     private let elapsedLabel = UILabel()
     private let remainingLabel = UILabel()
     private let playButton = UIButton()
+    private let airPlay = AVRoutePickerView()
+    private(set) var externalPlaybackAllowed = true
     private let preview = ScrubPreviewView(imageSize: CGSize(width: 192, height: 108), compact: true)
     private var duration: Double = 0
     private(set) var isScrubbing = false
@@ -41,7 +43,6 @@ final class MobileTransportView: UIView {
 
         let close = Self.roundButton("xmark", label: String(localized: "Close"), size: 44) { [weak self] in self?.onClose?() }
         close.accessibilityIdentifier = "player.close"
-        let airPlay = AVRoutePickerView()
         airPlay.tintColor = .white
         airPlay.activeTintColor = .systemBlue
         airPlay.prioritizesVideoDevices = true
@@ -165,6 +166,14 @@ final class MobileTransportView: UIView {
     }
 
     func setDetails(_ text: String?) { detailsLabel.text = text }
+
+    /// A joined room owns local synchronized playback. Ordinary players retain
+    /// the existing route picker by default.
+    func setExternalPlaybackAllowed(_ allowed: Bool) {
+        externalPlaybackAllowed = allowed
+        airPlay.isHidden = !allowed
+        airPlay.isUserInteractionEnabled = allowed
+    }
 
     func setBadge(_ text: String?) {
         badge.text = text
