@@ -3,6 +3,38 @@ import AVKit
 import Combine
 import UIKit
 
+/// Independent of media-clock and HTTP completion. A stopped owner checks its
+/// own identity after the wait and cannot expire a later player's lifecycle.
+@MainActor
+final class WatchRoomLifecycle {
+    private let session: WatchRoomSession
+    private let expired: () -> Void
+    private let wait: () async throws -> Void
+    private var task: Task<Void,Never>?
+    private var stopped = false
+    init(session: WatchRoomSession, expired: @escaping () -> Void,
+         wait: @escaping () async throws -> Void = { try await Task.sleep(for:.seconds(1)) }) {
+        self.session = session; self.expired = expired; self.wait = wait
+    }
+    func start() {
+        guard task == nil, !stopped else { return }
+        task = Task { [self] in
+            while !stopped, !Task.isCancelled {
+                do { try await wait() } catch { return }
+                guard !stopped, !Task.isCancelled else { return }
+                if !session.current() { stopped = true; expired(); return }
+            }
+        }
+    }
+    /// Stop admission synchronously; the controller retains/joins the actual
+    /// task before completing its ordinary owned cleanup and dismissal.
+    func stop() -> Task<Void,Never>? {
+        stopped = true
+        let previous = task; task = nil; previous?.cancel()
+        return previous
+    }
+}
+
 /// A normal local SDK source, owned by this room/viewer. Only explicit transport
 /// actions publish room state; applying a remote observation never echoes it.
 final class WatchRoomPlayerViewController: EnginePlayerViewController {
@@ -10,6 +42,12 @@ final class WatchRoomPlayerViewController: EnginePlayerViewController {
     private let gate: WatchRoomEngineGate
     private let preparation: WatchRoomPreparation
     private let progress: PlayerProgressWriter
+    private lazy var lifecycle = WatchRoomLifecycle(session:session) { [weak self] in
+        guard let self, !closing else { return }
+        engine.pause()
+        message.text = String(localized:"This room or its original playback context is no longer current. Closing the original room session…")
+        requestClose()
+    }
     private var identity: OriginalPlaybackProgress?
     private var loadTask: Task<Void,Never>?
     private var applyTask: Task<Void,Never>?
@@ -42,6 +80,15 @@ final class WatchRoomPlayerViewController: EnginePlayerViewController {
     }
     @available(*,unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    static func roomLoadOptions(_ base: LoadOptions, headers: [String:String]) -> LoadOptions {
+        var options = base
+        options.httpHeaders = headers
+        // AetherEngine 7.47 defaults to autostart. The room, not load(), owns
+        // the first play after actual seek readiness and the shared barrier.
+        options.autoplay = false
+        return options
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -100,13 +147,14 @@ final class WatchRoomPlayerViewController: EnginePlayerViewController {
         super.viewDidAppear(animated)
         guard loadTask == nil, !closing else { return }
         matchContent = view.window?.displayCriteriaMatchingEnabled ?? false
+        lifecycle.start()
         session.startPolling()
         loadTask = Task { [self] in
             do {
                 await TrackSettingsStore.shared.loadIfNeeded(); try gate.check()
                 let prepared = try await preparation.prepare(session.target)
                 try gate.check()
-                var options = baseLoadOptions(); options.httpHeaders = prepared.request.allHTTPHeaderFields ?? [:]
+                let options = Self.roomLoadOptions(baseLoadOptions(),headers:prepared.request.allHTTPHeaderFields ?? [:])
                 let tracks = prepared.tracks
                 try await gate.start(expectedDuration:prepared.status.duration ?? 0,load:{
                     _ = try await self.engine.load(url:prepared.request.url!,startPosition:self.session.observation.position(),
@@ -226,8 +274,10 @@ final class WatchRoomPlayerViewController: EnginePlayerViewController {
         if let cleanupTask { return cleanupTask }
         let ended = engine.state == .ended
         closing = true; gate.close(); timer?.invalidate(); timer = nil
+        let lifecycleTask = lifecycle.stop()
         loadTask?.cancel(); applyTask?.cancel(); actionTask?.cancel(); audioOffsetTask?.cancel(); engine.pause()
         let work = Task { [self] in
+            await lifecycleTask?.value
             await preparation.closeAndDrain()
             await loadTask?.value; await applyTask?.value; await actionTask?.value
             sample(ended:ended)
