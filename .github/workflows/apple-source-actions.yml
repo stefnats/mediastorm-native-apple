@@ -96,6 +96,14 @@ jobs:
             -resultBundlePath artifacts/SourceActions.xcresult \
             -only-testing:StrmrTVTests \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee artifacts/tvos-xctest.log
+      - name: Preserve tvOS diagnostics before the iOS build
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0, Node 24
+        with:
+          name: apple-tvos-diagnostics-${{ inputs.source_ref || github.sha }}
+          path: artifacts/tvos-xctest.log
+          if-no-files-found: error
+          retention-days: 14
       - name: Compile the shared iOS application and phone UI
         id: ios_build
         if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}

@@ -53,6 +53,11 @@ It does not publish apps, install on real devices, create releases or push sourc
 After successful environment preparation, the iOS build also runs when tvOS
 fails, so one platform cannot hide the other platform's compiler findings.
 The job still fails if either required build or unit suite fails.
+The tvOS log is uploaded immediately after its step, so its diagnostics can be
+reviewed while iOS is still building. The final artifact still preserves both
+platform logs and result bundles. Upload-artifact v5 makes a completed upload
+available through the UI and REST API before the run ends, as described in its
+[artifact documentation](https://github.com/actions/upload-artifact/blob/v5.0.0/README.md#improvements).
 The first published run used Xcode 26.6 / Swift 6.3.3 and failed while compiling
 the pinned player dependency, before application tests could run. The workflow
 now uses the same `xcode-27` runner as the dependency's own CI, selects its
