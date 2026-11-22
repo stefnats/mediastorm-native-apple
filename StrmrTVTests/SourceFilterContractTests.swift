@@ -65,12 +65,12 @@ final class SourceFilterContractTests: XCTestCase {
         XCTAssertNoThrow(try value.validated())
     }
     func testStableIndexesAndCandidateVersionNeverBecomeDisplayedPagePositions() throws {
-        let page = try SourceFilterFixture.page(indices: [51, 83], total: 2, retained: 100)
+        let page = try SourceFilterFixture.page(indices: [51, 83], total: 2, retained: 100, filters: SourceFilters(audioLanguage: "deu"))
         XCTAssertEqual(page.rows.map(\.id), [51, 83]); XCTAssertEqual(page.rows[1].result.candidateVersion, SourceFilterFixture.candidate(83))
         XCTAssertEqual(page.rows[1].result.snapshotID, "original-snapshot")
     }
     func testResultRawAndExactInt64SurviveOuterCorrelation() throws {
-        let result = try XCTUnwrap(SourceFilterFixture.page(indices: [6], total: 1, retained: 7).rows.first?.result)
+        let result = try XCTUnwrap(SourceFilterFixture.page(indices: [6], total: 1, retained: 7, filters: SourceFilters(audioLanguage: "deu")).rows.first?.result)
         XCTAssertTrue(NSDictionary(dictionary: result.raw).isEqual(to: SourceFilterFixture.raw(6)))
         XCTAssertEqual(result.sizeBytes, 9_007_199_254_740_993); XCTAssertNil(result.raw["snapshotId"])
     }
@@ -92,7 +92,7 @@ final class SourceFilterContractTests: XCTestCase {
         XCTAssertThrowsError(try SourceFilterWire.page(raw))
     }
     func testActualProbeBodyUsesSnapshotIdSourceIndexAndOriginalProfile() throws {
-        let result = try XCTUnwrap(SourceFilterFixture.page(indices: [73], total: 1, retained: 100).rows.first?.result)
+        let result = try XCTUnwrap(SourceFilterFixture.page(indices: [73], total: 1, retained: 100, filters: SourceFilters(audioLanguage: "deu")).rows.first?.result)
         let body = APIClient.sourceFilterProbeBody(result, context: StoredMediaFixture.context())
         XCTAssertEqual(body["snapshotId"] as? String, "original-snapshot"); XCTAssertEqual(body["sourceIndex"] as? Int, 73)
         XCTAssertEqual(body["profileId"] as? String, "original"); XCTAssertEqual(body["probeForTracks"] as? Bool, true)
