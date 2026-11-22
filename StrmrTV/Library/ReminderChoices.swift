@@ -90,11 +90,11 @@ enum ReminderChoices {
     }
     static func sameTitle(_ target: DetailsTarget, _ title: Title) -> Bool {
         guard target.isMovie == title.isMovie else { return false }
-        if let expected = target.tmdbID.flatMap(Int.init), expected > 0, let actual = title.tmdbId, actual > 0, expected != actual { return false }
-        if let expected = target.tvdbID.flatMap(Int.init), expected > 0, let actual = title.tvdbId, actual > 0, expected != actual { return false }
+        if let expected = target.tmdbID.flatMap({ Int($0) }), expected > 0, let actual = title.tmdbId, actual > 0, expected != actual { return false }
+        if let expected = target.tvdbID.flatMap({ Int($0) }), expected > 0, let actual = title.tvdbId, actual > 0, expected != actual { return false }
         if let expected = target.imdbID, !expected.isEmpty, let actual = title.imdbId, !actual.isEmpty, expected != actual { return false }
-        return target.titleID == title.id || target.tmdbID.flatMap(Int.init).map { $0 > 0 && $0 == title.tmdbId } == true ||
-            target.tvdbID.flatMap(Int.init).map { $0 > 0 && $0 == title.tvdbId } == true ||
+        return target.titleID == title.id || target.tmdbID.flatMap({ Int($0) }).map { $0 > 0 && $0 == title.tmdbId } == true ||
+            target.tvdbID.flatMap({ Int($0) }).map { $0 > 0 && $0 == title.tvdbId } == true ||
             target.imdbID.map { $0.hasPrefix("tt") && $0 == title.imdbId } == true
     }
     static func official(_ episode: Episode) -> ReminderEpisode? {
