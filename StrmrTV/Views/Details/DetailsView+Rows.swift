@@ -50,6 +50,7 @@ extension DetailsView {
                                     play(episode: ep, from: resumePoint(ep))
                                 }
                                 .id(ep.id)
+                                .sourceHintVisible(SourceHintAdapters.episode(ep,titleID:target.titleID),order:season.episodes.firstIndex(where:{$0.id == ep.id}) ?? 0)
                             }
                         }
                         .padding(.vertical, 30)

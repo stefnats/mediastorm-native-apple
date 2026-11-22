@@ -16,7 +16,7 @@ struct SourceAvailability: Decodable, Hashable, Sendable {
         state = try c.decodeIfPresent(String.self,forKey:.state) ?? "unknown"
         checkedAt = try c.decodeIfPresent(String.self,forKey:.checkedAt)
         expiresAt = try c.decodeIfPresent(String.self,forKey:.expiresAt)
-        providers = try c.decodeIfPresent([String].self,forKey:.providers) ?? []
+        providers = c.contains(.providers) ? try c.decode([String].self,forKey:.providers) : []
         complete = try c.decodeIfPresent(Bool.self,forKey:.complete) ?? false
         reason = try c.decodeIfPresent(String.self,forKey:.reason)
         sourceType = try c.decodeIfPresent(String.self,forKey:.sourceType)
@@ -42,7 +42,7 @@ struct SourceAvailability: Decodable, Hashable, Sendable {
             else if sourceType != nil || reason == "local_file_checked" {
                 if state == "found", sourceType == "local", reason == "local_file_checked", providers.isEmpty,
                    interval.map({$0 <= 120}) == true { kind = .local }
-            } else if state == "not_found", complete, !providers.isEmpty, ["no_matching_candidates","reported_candidates"].contains(reason ?? "") { kind = inLibrary ? .localNeedsChecking : .missing }
+            } else if state == "not_found", complete, ["no_matching_candidates","reported_candidates"].contains(reason ?? "") { kind = inLibrary ? .localNeedsChecking : .missing }
             else if state == "found" { kind = .candidate }
         }
         return SourceHintPresentation(kind:kind,reason:reason,checkedAt:checkedAt.flatMap(RecordingCapture.date).flatMap{$0 <= now ? $0 : nil},
@@ -133,4 +133,4 @@ struct SourceHintPresentation: Equatable {
     }
 }
 
-enum SourceHintFailure: Error { case invalid,changed,unsupported }
+enum SourceHintFailure: Error, Equatable { case invalid,changed,unsupported }

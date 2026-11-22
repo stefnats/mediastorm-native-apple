@@ -52,6 +52,7 @@ private struct MobileHomeContent: View {
 
     var body: some View {
         lifecycle(page)
+            .sourceHintScope(active:isOnScreen && scenePhase == .active && playback.resolving == nil)
             .environment(\.homeAction) { run($0) }
             .modifier(actionAlerts)
             .offerTasteSetup(ready: store.hasLoaded && isOnScreen && scenePhase == .active)

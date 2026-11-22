@@ -99,6 +99,7 @@ extension MobileDetailsView {
         }
         .buttonStyle(.plain)
         .accessibilityHint(selected ? "Plays this episode" : "Selects this episode")
+        .sourceHintVisible(SourceHintAdapters.episode(ep,titleID:target.titleID),order:ep.episodeNumber)
         .contentShape(.contextMenuPreview, MobileEpisodeCard.shape)
         .contextMenu {
             let resumeAt = model.resumePoint(ep)
@@ -176,10 +177,10 @@ struct MobileEpisodeCard: View {
                 .overlay(Image(systemName: "film").font(.title2).foregroundStyle(.tertiary))
         }
         .frame(width: Self.imageSize.width, height: Self.imageSize.height)
-        .sourceHintDimming(episode.sourceAvailability,inLibrary:inLibrary)
-        .overlay(alignment:.bottomLeading) { SourceHintBadge(value:episode.sourceAvailability,inLibrary:inLibrary).padding(6) }
+        .sourceHintDimming(episode.sourceAvailability,inLibrary:inLibrary,coordinate:SourceHintAdapters.episodeDisplay(episode))
         .blur(radius: hidesThumbnail ? 24 : 0, opaque: true)
         .clipShape(Self.shape)
+        .overlay(alignment:.bottomLeading) { SourceHintBadge(value:episode.sourceAvailability,inLibrary:inLibrary,coordinate:SourceHintAdapters.episodeDisplay(episode)).padding(6).padding(.bottom,progress > 0 ? 10 : 0) }
         .overlay(alignment: .topLeading) {
             Text("\(episode.episodeNumber)")
                 .font(.caption.weight(.bold))

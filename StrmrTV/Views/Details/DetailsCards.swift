@@ -93,10 +93,10 @@ struct EpisodeCard: View {
                     image.resizable().aspectRatio(contentMode: .fill)
                 } placeholder: { Rectangle().fill(.quaternary) }
                 .frame(width: 400, height: 225)
-                .sourceHintDimming(episode.sourceAvailability,inLibrary:inLibrary)
-                .overlay(alignment:.topTrailing) { SourceHintBadge(value:episode.sourceAvailability,inLibrary:inLibrary).padding(10) }
+                .sourceHintDimming(episode.sourceAvailability,inLibrary:inLibrary,coordinate:SourceHintAdapters.episodeDisplay(episode))
                 // Opaque, so the blur doesn't fade into the page at the edges.
                 .blur(radius: hidesThumbnail ? 36 : 0, opaque: true)
+                .overlay(alignment:.bottomLeading) { SourceHintBadge(value:episode.sourceAvailability,inLibrary:inLibrary,coordinate:SourceHintAdapters.episodeDisplay(episode)).padding(10).padding(.bottom,ProgressBar.shows(fraction) ? 20 : 0) }
                 .overlay(alignment: .bottom) {
                     if ProgressBar.shows(fraction) { ProgressBar(fraction: fraction).padding(14) }
                 }

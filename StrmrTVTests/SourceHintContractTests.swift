@@ -44,7 +44,8 @@ enum SourceHintFixture {
 final class SourceHintContractTests: XCTestCase {
     func testOptionalTitleAndEpisodeAnnotationsDecodeWithoutPoisoningCatalogueOnMalformedHint() throws {
         XCTAssertNil(try SourceHintFixture.title().sourceAvailability)
-        let invalids: [Any] = [true,"unexpected",[1,2],["complete":"true","state":"not_found"]]
+        var nullProviders = SourceHintFixture.raw(); nullProviders["providers"] = NSNull()
+        let invalids: [Any] = [true,"unexpected",[1,2],["complete":"true","state":"not_found"],nullProviders]
         for invalid in invalids {
             let title = try SourceHintFixture.title(invalid), episode = try SourceHintFixture.episode(invalid)
             XCTAssertEqual(title.id,"tmdb:movie:55"); XCTAssertEqual(episode.id,"actual-episode-id")
@@ -80,6 +81,10 @@ final class SourceHintContractTests: XCTestCase {
             XCTAssertEqual(try SourceHintFixture.hint(SourceHintFixture.raw(state:state,complete:complete,reason:reason)).presentation(at:SourceHintFixture.now).dimArtwork,missing)
         }
         var noProviders = SourceHintFixture.raw(); noProviders["providers"] = [String]()
+        XCTAssertTrue(try SourceHintFixture.hint(noProviders).presentation(at:SourceHintFixture.now).dimArtwork)
+        noProviders["providers"] = nil
+        XCTAssertTrue(try SourceHintFixture.hint(noProviders).presentation(at:SourceHintFixture.now).dimArtwork)
+        noProviders["complete"] = false
         XCTAssertFalse(try SourceHintFixture.hint(noProviders).presentation(at:SourceHintFixture.now).dimArtwork)
     }
     func testFoundIsACandidateAndCheckedLocalFileRequiresItsExactEvidenceShape() throws {

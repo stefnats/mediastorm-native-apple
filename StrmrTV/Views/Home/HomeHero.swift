@@ -12,10 +12,12 @@ struct HeroContent: Equatable {
     /// black in place of a backdrop, as the Expo home does; the title is then the name.
     var framedLogoURL: String?
     var sourceAvailability: SourceAvailability?
+    var sourceHintCoordinate: VisibleSourceCoordinate?
 
     @MainActor init(_ original: HomeCard, artwork: PersonalArtworkStore = .shared) {
         let card = original.personalArtwork(using:artwork)
         sourceAvailability = card.sourceAvailability
+        sourceHintCoordinate = SourceHintAdapters.title(card)
         id = card.id
         title = card.title
         subtitle = card.subtitle
@@ -96,7 +98,7 @@ struct HeroInfo: View {
                 Text(hero?.subtitle ?? " ")
                     .font(.system(size: m.line * textScale, weight: .medium))
                     .lineLimit(1)
-                SourceHintBadge(value:hero?.sourceAvailability)
+                SourceHintBadge(value:hero?.sourceAvailability,coordinate:hero?.sourceHintCoordinate)
             }
             if m.lines > 0 {
                 Text(hero?.overview ?? " ")

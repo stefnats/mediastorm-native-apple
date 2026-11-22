@@ -62,6 +62,7 @@ struct MobileBrowseGrid: View {
                 if !model.entries.isEmpty {
                     MobilePosterGrid(items: model.entries, onNearEnd: { Task { await model.loadPage() } }) { entry in
                         MobileGridCard(card: HomeCard(entry), onRemoveFromList: removeAction(entry))
+                            .environment(\.sourceHintOrdinal,model.entries.firstIndex(where:{$0.id == entry.id}) ?? 0)
                     }
                     if model.isLoadingPage { ProgressView().frame(maxWidth: .infinity).padding() }
                 } else {
@@ -70,6 +71,7 @@ struct MobileBrowseGrid: View {
             }
             .padding(.vertical, 8)
         }
+        .sourceHintScope()
         .refreshable { await model.refreshInPlace() }
         .navigationTitle(title)
         // A long name (an Ask AI prompt) would be cut off as a large title.

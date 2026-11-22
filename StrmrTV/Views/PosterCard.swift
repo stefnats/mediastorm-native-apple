@@ -84,6 +84,7 @@ struct PosterCard: View {
             }
         }
         .frame(width: width, alignment: .leading)
+        .sourceHintVisible(.title(SourceTitleCoordinate(target)))
     }
 
     private var artwork: some View {
@@ -94,8 +95,8 @@ struct PosterCard: View {
         .overlay(alignment: .topLeading) {
             ArtworkBadges(badge: badge, watch: watchBadge, unwatchedCount: unwatchedCount).padding(10)
         }
-        .sourceHintDimming(sourceAvailability)
-        .overlay(alignment:.bottomLeading) { SourceHintBadge(value:sourceAvailability).padding(8) }
+        .sourceHintDimming(sourceAvailability,coordinate:.title(SourceTitleCoordinate(target)))
+        .overlay(alignment:.bottomLeading) { SourceHintBadge(value:sourceAvailability,coordinate:.title(SourceTitleCoordinate(target))).padding(8) }
     }
 
     static func artURL(_ target: DetailsTarget, artwork: PersonalArtworkStore = .shared) -> URL? {

@@ -42,7 +42,7 @@ struct HomeCarousel: View {
         // crossfades in over the old where it stands, and nothing moves.
         ZStack(alignment: .bottomLeading) {
             HomeCarouselInfo(card: current, rowTitle: shelf.title, textScale: textScale)
-                .overlay(alignment:.topTrailing) { SourceHintBadge(value:current?.sourceAvailability) }
+                .overlay(alignment:.topTrailing) { SourceHintBadge(value:current?.sourceAvailability,coordinate:current.flatMap{SourceHintAdapters.title($0)}) }
                 .id(current?.id)
                 .transition(.opacity)
         }
@@ -63,6 +63,7 @@ struct HomeCarousel: View {
         .opacity(shown ? 1 : 0)
         .allowsHitTesting(false)
         .accessibilityHidden(!shown)
+        .sourceHintVisible(SourceHintAdapters.hero(current,visible:shown && isActive),order:-1)
         .observesRemoteActivity()
         .task(id: TimerKey(index: index, isActive: isActive && shown, count: slides.count, presses: remote.count)) {
             guard isActive, shown, slides.count > 1 else { return }

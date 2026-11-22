@@ -35,9 +35,9 @@ struct MobileDetailsView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     hero(size: geo.size)
                     VStack(alignment: .leading, spacing: 22) {
-                        headerText
+                        headerText.sourceHintVisible(SourceHintAdapters.title(model.title),order:-1)
                         if let title = model.title { PersonalTitleActions(title: title).id(title.id) }
-                        SourceHintBadge(value:model.title?.sourceAvailability)
+                        SourceHintBadge(value:model.title?.sourceAvailability,coordinate:SourceHintAdapters.title(model.title))
                         actionsSection
                         prequeueSection
                         if !target.isMovie { episodesSection }
@@ -59,6 +59,7 @@ struct MobileDetailsView: View {
             ToolbarItem(placement: .principal) { Text("") }
             ToolbarItem(placement: .topBarTrailing) { moreMenu }
         }
+        .sourceHintScope(active:playback.resolving == nil)
         .task { await model.load() }
         .onAppear { if automaticallyPrewarm && !target.suppressAutomaticSourcePreparation { playback.prewarm(target) } }
         .onChange(of: playback.sessionsEnded) {

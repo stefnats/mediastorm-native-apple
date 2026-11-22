@@ -161,6 +161,7 @@ struct HomeView: View {
         Group {
             if style.isClassic { classicPage } else { stackedPage }
         }
+        .sourceHintScope(active:isOnScreen && !isCovered && scenePhase == .active && playback.resolving == nil)
         .offerTasteSetup(ready: store.hasLoaded && isOnScreen && !isCovered && scenePhase == .active)
         // Floats over the hero, so turning it on moves nothing.
         .overlay(alignment: .top) {

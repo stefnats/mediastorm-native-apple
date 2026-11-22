@@ -17,6 +17,7 @@ struct MobileCardLink<Label: View>: View {
     var previewCornerRadius: CGFloat = MobileCardMetrics.cornerRadius
     var sourceHintNavigation = false
     @Environment(\.mobilePush) private var push
+    @Environment(\.sourceHintOwner) private var sourceHints
     @ViewBuilder let label: Label
 
     var body: some View {
@@ -24,7 +25,10 @@ struct MobileCardLink<Label: View>: View {
         case let .details(target):
             let link = Group {
                 if sourceHintNavigation {
-                    Button { push(SourceHintNavigation.target(target,hint:card.sourceAvailability)) } label: { label }
+                    Button {
+                        let hint = sourceHints.map{$0.value(SourceHintAdapters.title(card),annotation:card.sourceAvailability)} ?? card.sourceAvailability
+                        push(SourceHintNavigation.target(target,hint:hint))
+                    } label: { label }
                 } else { NavigationLink(value: target) { label } }
             }
                 .buttonStyle(.plain)

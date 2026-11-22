@@ -64,12 +64,13 @@ struct LandscapeCard: View {
 
             if text == .below { CardCaption(title: card.title, subtitle: card.subtitle, width: width) }
         }
+        .sourceHintVisible(SourceHintAdapters.title(card))
     }
 
     private var artwork: some View {
         tileOrArt
-            .sourceHintDimming(card.sourceAvailability)
-            .overlay(alignment:.topTrailing) { SourceHintBadge(value:card.sourceAvailability).padding(10) }
+            .sourceHintDimming(card.sourceAvailability,coordinate:SourceHintAdapters.title(card))
+            .overlay(alignment:.topTrailing) { SourceHintBadge(value:card.sourceAvailability,coordinate:SourceHintAdapters.title(card)).padding(10) }
             .overlay(alignment: .bottom) {
                 // A poster opened to 16:9 on focus draws it too, as a 16:9 card (left-aligned,
                 // over the same gradient and lifted clear of the progress bar): the Expo app

@@ -30,6 +30,7 @@ struct MobileHomeCarousel: View {
         TabView(selection: $index) {
             ForEach(Array(slides.enumerated()), id: \.element.id) { offset, card in
                 MobileHomeHero(card: card, size: tileSize, pageCount: slides.count)
+                    .sourceHintVisible(SourceHintAdapters.hero(card,visible:offset == index),order:-1)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .tag(offset)
             }
@@ -94,7 +95,7 @@ struct MobileHomeHero: View {
             LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .center, endPoint: .bottom)
         }
         .overlay(alignment: .bottomLeading) { info }
-        .overlay(alignment:.topTrailing) { SourceHintBadge(value:card.sourceAvailability).padding(10) }
+        .overlay(alignment:.topTrailing) { SourceHintBadge(value:card.sourceAvailability,coordinate:SourceHintAdapters.title(card)).padding(10) }
         .overlay(alignment: .bottom) {
             if ProgressBar.shows(card.progress) {
                 MobileProgressBar(value: card.progress).padding(.horizontal, 16).padding(.bottom, 6)
