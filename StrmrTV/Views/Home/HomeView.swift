@@ -137,7 +137,7 @@ struct HomeView: View {
             let cards = Array(shelf.shown)
             return cards.isEmpty ? nil : HeroContent(cards[min(promotedIndex, cards.count - 1)])
         }
-        return shelf.shown.first { $0.id == focus.card }.map(HeroContent.init)
+        return shelf.shown.first { $0.id == focus.card }.map { HeroContent($0) }
     }
 
     /// Where focus goes on entering the rows: the card last left, else the first row's
