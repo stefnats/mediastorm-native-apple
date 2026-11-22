@@ -17,6 +17,7 @@ struct ListsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 56) {
+                PersonalToolsView()
                 TileRow(title: String(localized: "For You"), tiles: personalTiles)
 
                 if let customLists = store.lists {

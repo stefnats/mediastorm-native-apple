@@ -29,6 +29,7 @@ struct MobileListsView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 24) {
+                PersonalToolsView()
                 MobileTileRow(title: String(localized: "For You"), tiles: catalog.personalTiles)
                 if let custom = catalog.customTiles {
                     MobileTileRow(title: String(localized: "Your Lists"), tiles: custom, onNewList: startNewList)

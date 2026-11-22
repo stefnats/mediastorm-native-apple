@@ -4,6 +4,7 @@ struct DetailsView: View {
     // State and helpers are internal, not private: the page is split across
     // DetailsView+Actions.swift and DetailsView+Rows.swift.
     let target: DetailsTarget
+    var automaticallyPrewarm = true
 
     @ObservedObject var playback = PlaybackCoordinator.shared
     @ObservedObject var spoilers = SpoilerSettingsStore.shared
@@ -255,7 +256,7 @@ struct DetailsView: View {
         // Not in the navigation destination: that runs during a view update, so its publish
         // re-ran every destination on the stack, and two details pages prewarming in turn
         // never settled (a page opened from More Like This froze the app).
-        .onAppear { playback.prewarm(target) }
+        .onAppear { if automaticallyPrewarm { playback.prewarm(target) } }
         .task { await infoLineStore.refresh() }
         .task { await load() }
         .onReceive(DeepLinkRouter.shared.$autoplayTitleID) { _ in autoplayIfRequested() }

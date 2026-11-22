@@ -8,6 +8,7 @@ import SwiftUI
 /// `MobileDetailsModel`; More Options is the navigation bar's menu.
 struct MobileDetailsView: View {
     let target: DetailsTarget
+    let automaticallyPrewarm: Bool
 
     @StateObject var model: MobileDetailsModel
     @ObservedObject var playback = PlaybackCoordinator.shared
@@ -22,8 +23,9 @@ struct MobileDetailsView: View {
     @State var watchlistBusy = false
     @State var watchedBusy = false
 
-    init(target: DetailsTarget) {
+    init(target: DetailsTarget, automaticallyPrewarm: Bool = true) {
         self.target = target
+        self.automaticallyPrewarm = automaticallyPrewarm
         _model = StateObject(wrappedValue: MobileDetailsModel(target: target))
     }
 
@@ -57,7 +59,7 @@ struct MobileDetailsView: View {
             ToolbarItem(placement: .topBarTrailing) { moreMenu }
         }
         .task { await model.load() }
-        .onAppear { playback.prewarm(target) }
+        .onAppear { if automaticallyPrewarm { playback.prewarm(target) } }
         .onChange(of: playback.sessionsEnded) {
             model.prequeueOverrides = (nil, ManualTrackOverrides())
             Task { await model.load() }
