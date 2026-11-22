@@ -251,12 +251,12 @@ final class LivePlayerViewController: EnginePlayerViewController {
         guard sessionID != nil else { return }
         keepAliveTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, let id = sessionID, keepAliveWork == nil else { return }
-                keepAliveWork = Task { [weak self] in
+                guard let self, let id = self.sessionID, self.keepAliveWork == nil else { return }
+                self.keepAliveWork = Task { [weak self] in
                     guard let self else { return }
-                    defer { keepAliveWork = nil }
-                    do { try await api.keepLiveSessionAliveStrict(id, context: liveAttempt.context) }
-                    catch { if !didFinish, sessionID == id { fail(error.localizedDescription) } }
+                    defer { self.keepAliveWork = nil }
+                    do { try await self.api.keepLiveSessionAliveStrict(id, context: self.liveAttempt.context) }
+                    catch { if !self.didFinish, self.sessionID == id { self.fail(error.localizedDescription) } }
                 }
             }
         }
