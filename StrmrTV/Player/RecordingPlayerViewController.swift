@@ -6,13 +6,61 @@ import UIKit
 @MainActor
 enum RecordingPlayback {
     static func play(_ recording: Recording) {
-        let coordinator = PlaybackCoordinator.shared
-        guard coordinator.resolving == nil, let engine = coordinator.sharedEngine else { return }
+        let context = APIClient.shared.sourceContext()
+        if recording.capturePresent, recording.singleActivePart == nil {
+            return choosePart(recording, context: context)
+        }
+        do {
+            let source: RecordingPlaybackSource
+            if recording.capturePresent { source = try .singleActive(recording, context: context) }
+            else { source = try .legacy(recording, context: context) }
+            present(source)
+        } catch { show(error) }
+    }
+
+    static func playPart(_ recording: Recording, index: Int, context: SourceActionContext, dismissPresented: Bool = false) {
+        do {
+            try APIClient.shared.requireSourceContext(context)
+            let source = try RecordingPlaybackSource.part(recording, index: index, context: context)
+            if dismissPresented, let top = presenter(), top.presentingViewController != nil {
+                top.dismiss(animated: true) { present(source) }
+            } else { present(source) }
+        } catch { show(error) }
+    }
+
+    private static func presenter() -> UIViewController? {
         let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
         var top = scene?.windows.first(where: \.isKeyWindow)?.rootViewController
         while let presented = top?.presentedViewController { top = presented }
+        return top
+    }
+
+    private static func present(_ source: RecordingPlaybackSource) {
+        let coordinator = PlaybackCoordinator.shared
+        guard coordinator.resolving == nil, let engine = coordinator.sharedEngine else { return }
+        let top = presenter()
         guard let top, !(top is EnginePlayerViewController) else { return }
-        top.present(RecordingPlayerViewController(engine: engine, recording: recording), animated: true)
+        guard APIClient.shared.isCurrent(source.context) else { return }
+        top.present(RecordingPlayerViewController(engine: engine, recording: source.recording, source: source), animated: true)
+    }
+
+    private static func choosePart(_ recording: Recording, context: SourceActionContext) {
+        guard let top = presenter(), !(top is EnginePlayerViewController) else { return }
+        let alert = UIAlertController(title: String(localized: "Choose a captured part"), message: recording.captureNotice, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: String(localized: "Cancel"), style: .cancel))
+        for part in recording.playableParts {
+            alert.addAction(UIAlertAction(title: part.label, style: .default) { [weak alert] _ in
+                alert?.dismiss(animated: true) { playPart(recording, index: part.index, context: context) }
+            })
+        }
+        top.present(alert, animated: true)
+    }
+
+    private static func show(_ error: Error) {
+        guard let top = presenter(), !(top is UIAlertController) else { return }
+        let alert = UIAlertController(title: String(localized: "Recording unavailable"), message: error.localizedDescription, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: String(localized: "Close"), style: .cancel))
+        top.present(alert, animated: true)
     }
 }
 
@@ -32,6 +80,8 @@ enum RecordingPlayback {
 final class RecordingPlayerViewController: EnginePlayerViewController {
     let recording: Recording
     let growing: Bool
+    private let source: RecordingPlaybackSource?
+    private let sourceGuard: RecordingSourceGuard?
     private var loadTask: Task<Void, Never>?
     private(set) var didFinish = false
     private(set) var lastPosition: Double = 0
@@ -63,9 +113,16 @@ final class RecordingPlayerViewController: EnginePlayerViewController {
     /// Shown while the server still follows the recording.
     static let recBadgeText = String(localized: "● REC")
 
-    init(engine: AetherEngine, recording: Recording) {
+    init(engine: AetherEngine, recording: Recording, source: RecordingPlaybackSource? = nil) {
         self.recording = recording
-        growing = recording.status == .running || recording.status == .starting
+        self.source = source
+        sourceGuard = source.flatMap { value in value.recording.capturePresent ? RecordingSourceGuard(value) : nil }
+        if let source {
+            switch source.kind {
+            case .legacyGrowing, .singleActive: growing = true
+            case .legacyWhole, .part: growing = false
+            }
+        } else { growing = recording.status == .running || recording.status == .starting }
         super.init(engine: engine, logCategory: "recording-player")
         audioOffsetKey = AudioOffsetStore.Key.recording(recording.id)
     }
@@ -114,12 +171,27 @@ final class RecordingPlayerViewController: EnginePlayerViewController {
         loadTask = Task { [weak self] in
             guard let self else { return }
             do {
+                if recording.capturePresent, sourceGuard == nil {
+                    throw APIError.notReady("Choose an actual captured part before playback")
+                }
+                if let sourceGuard { try await sourceGuard.validateForOpen() }
                 var options = baseLoadOptions()
                 let url: URL
                 if growing {
                     endSession()
-                    let session = try await APIClient.shared.startRecordingHLS(recording)
-                    try Task.checkCancellation()
+                    let session: (url: URL, sessionID: String)
+                    if let source, case .singleActive = source.kind {
+                        session = try await APIClient.shared.startRecordingHLS(source)
+                    } else { session = try await APIClient.shared.startRecordingHLS(recording) }
+                    do {
+                        try Task.checkCancellation()
+                        guard !didFinish else { throw CancellationError() }
+                        if let sourceGuard { try await sourceGuard.validateForOpen() }
+                    } catch {
+                        if let source, source.recording.capturePresent { await APIClient.shared.stopRecordingHLS(session.sessionID, context: source.context) }
+                        else { await APIClient.shared.stopLiveSession(session.sessionID) }
+                        throw error
+                    }
                     sessionID = session.sessionID
                     serverGrowing = true
                     startKeepAlive()
@@ -127,13 +199,28 @@ final class RecordingPlayerViewController: EnginePlayerViewController {
                     // The server's playlist straight to AVPlayer, as a seekable programme (not live):
                     // AVPlayer reloads an EVENT playlist itself and keeps every segment seekable.
                     options.nativeRemoteHLS = true
+                } else if let source, case .part = source.kind {
+                    let request = try source.partRequest()
+                    guard let value = request.url else { throw APIError.notReady("The part address is unavailable") }
+                    url = value
                 } else {
                     url = APIClient.shared.recordingStreamURL(recording)
                 }
+                if let source, source.recording.capturePresent {
+                    try sourceGuard?.requireCurrent()
+                    let request = try source.context.request("GET", path: "/api/live/recordings/\(APIClient.segment(recording.id))/stream")
+                    options.httpHeaders = request.allHTTPHeaderFields ?? [:]
+                }
                 _ = try await engine.load(url: url, startPosition: position, options: options)
+                if let sourceGuard { try sourceGuard.requireCurrent() }
+                try Task.checkCancellation()
+                guard !didFinish else { throw CancellationError() }
                 // An EVENT playlist starts at its live edge unless told otherwise.
                 if growing, position > 0 { try await waitForPlaylist(toReach: position) }
                 if growing, abs(engine.clock.currentTime - position) > 5 { await seekPlayback(to: position) }
+                if let sourceGuard { try sourceGuard.requireCurrent() }
+                try Task.checkCancellation()
+                guard !didFinish else { throw CancellationError() }
                 opening = false
                 log.info("opened at \(Int(position))s, duration \(Int(engine.duration))s")
                 engine.play()
@@ -158,9 +245,13 @@ final class RecordingPlayerViewController: EnginePlayerViewController {
         guard let id = sessionID else { return }
         let paused = engine.state == .paused, buffering = engine.isBuffering, time = lastPosition
         Task { [weak self] in
-            guard let growing = await APIClient.shared.keepRecordingHLSAlive(id, time: time, paused: paused,
-                                                                            buffering: buffering),
-                  let self, sessionID == id else { return }
+            guard let self else { return }
+            let value: Bool?
+            if let source, source.recording.capturePresent {
+                guard APIClient.shared.isCurrent(source.context) else { fail(String(localized: "The original recording profile changed. Reopen its parts.")); return }
+                value = await APIClient.shared.keepRecordingHLSAlive(id, time: time, paused: paused, buffering: buffering, context: source.context)
+            } else { value = await APIClient.shared.keepRecordingHLSAlive(id, time: time, paused: paused, buffering: buffering) }
+            guard let growing = value, !didFinish, sessionID == id else { return }
             if growing != serverGrowing { log.info("server growing: \(growing)") }
             serverGrowing = growing
             #if os(iOS)
@@ -176,7 +267,9 @@ final class RecordingPlayerViewController: EnginePlayerViewController {
         keepAliveTimer = nil
         guard let id = sessionID else { return }
         sessionID = nil
-        Task { await APIClient.shared.stopLiveSession(id) }
+        if let source, source.recording.capturePresent {
+            Task { await APIClient.shared.stopRecordingHLS(id, context: source.context) }
+        } else { Task { await APIClient.shared.stopLiveSession(id) } }
     }
 
     // MARK: Engine binding
@@ -215,9 +308,12 @@ final class RecordingPlayerViewController: EnginePlayerViewController {
         guard growing, resumes < Self.resumeBudget, let id = sessionID else { return endPlayback() }
         let position = lastPosition
         Task { [weak self] in
-            let following = await APIClient.shared.keepRecordingHLSAlive(id, time: position, paused: false,
-                                                                         buffering: false)
-            guard let self, !didFinish else { return }
+            guard let self else { return }
+            let following: Bool?
+            if let source, source.recording.capturePresent {
+                following = await APIClient.shared.keepRecordingHLSAlive(id, time: position, paused: false, buffering: false, context: source.context)
+            } else { following = await APIClient.shared.keepRecordingHLSAlive(id, time: position, paused: false, buffering: false) }
+            guard !didFinish, sessionID == id else { return }
             guard following == true else { return endPlayback() }
             resumes += 1
             log.notice("playlist ended while the server still follows the file: new session at \(Int(position))s")
@@ -347,6 +443,7 @@ final class RecordingPlayerViewController: EnginePlayerViewController {
     override func finish() {
         guard !didFinish else { return }
         didFinish = true
+        sourceGuard?.close()
         log.notice("player closed at \(Int(lastPosition))s")
         loadTask?.cancel()
         scrubCommit?.cancel()

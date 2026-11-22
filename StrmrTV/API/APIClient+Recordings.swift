@@ -1,6 +1,17 @@
 import Foundation
 
 extension APIClient {
+    /// Fresh capture data under the original explicit part-selection context.
+    func recording(_ id: String, context: SourceActionContext) async throws -> Recording {
+        try requireSourceContext(context)
+        let request = try context.request("GET", path: "/api/live/recordings/\(Self.segment(id))")
+        let data = try await sendOriginalSourceAction(request)
+        try requireSourceContext(context)
+        let value = try decoder.decode(Recording.self, from: data)
+        guard value.id == id else { throw APIError.notReady("The recording response belongs to another file") }
+        return value
+    }
+
     /// The profile's recordings, every status (`GET /api/live/recordings`).
     func recordings() async throws -> [Recording] {
         let response: RecordingsResponse = try await send("GET", "/api/live/recordings", query: ["profileId": profileID])
@@ -42,6 +53,48 @@ extension APIClient {
             throw APIError.notReady("The server did not return a playlist for this recording")
         }
         return (try mediaURL(apiPath: path), sessionID)
+    }
+
+    /// Captured growing input is the exact guarded active part, not a first-file alias.
+    func startRecordingHLS(_ source: RecordingPlaybackSource) async throws -> (url: URL, sessionID: String) {
+        try requireSourceContext(source.context)
+        let data = try await sendOriginalSourceAction(source.growingRequest())
+        let start = try decoder.decode(RecordingHLSStart.self, from: data)
+        guard let id = start.sessionId, !id.isEmpty else {
+            throw APIError.notReady("The server did not confirm this active recording part")
+        }
+        do {
+            guard let path = start.playlistUrl, !path.isEmpty else {
+                throw APIError.notReady("The server did not confirm this active recording part")
+            }
+            try requireSourceContext(source.context)
+            return (try mediaURL(apiPath: path), id)
+        } catch {
+            await stopRecordingHLS(id, context: source.context)
+            throw error
+        }
+    }
+
+    /// Known captured sessions are released with their original request context only.
+    func stopRecordingHLS(_ id: String, context: SourceActionContext) async {
+        guard let request = try? context.request("POST", path: "/api/video/hls/\(Self.segment(id))/stop") else { return }
+        _ = try? await sendOriginalSourceAction(request)
+    }
+
+    func keepRecordingHLSAlive(_ id: String, time: Double, paused: Bool, buffering: Bool,
+                              context: SourceActionContext) async -> Bool? {
+        do {
+            try requireSourceContext(context)
+            var request = try context.request("POST", path: "/api/video/hls/\(Self.segment(id))/keepalive")
+            guard let url = request.url, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+            components.queryItems = (components.queryItems ?? []) + [URLQueryItem(name: "time", value: String(format: "%.1f", time)),
+                URLQueryItem(name: "paused", value: String(paused)), URLQueryItem(name: "buffering", value: String(buffering))]
+            request.url = components.url
+            request.timeoutInterval = 10
+            let data = try await sendOriginalSourceAction(request)
+            try requireSourceContext(context)
+            return try decoder.decode(RecordingHLSKeepAlive.self, from: data).growing ?? false
+        } catch { return nil }
     }
 
     /// Keeps a recording's HLS session alive and reports where playback is. Returns whether the

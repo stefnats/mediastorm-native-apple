@@ -97,17 +97,34 @@ struct MobileRecordingDetailSheet: View {
                 Section {
                     LabeledContent("Starts", value: recording.startAt.formatted(date: .abbreviated, time: .shortened))
                     LabeledContent("Ends", value: recording.endAt.formatted(date: .abbreviated, time: .shortened))
-                    if !recording.durationText.isEmpty { LabeledContent("Duration", value: recording.durationText) }
+                    if !recording.durationText.isEmpty { LabeledContent("Scheduled window", value: recording.durationText) }
                     if let size = recording.sizeText { LabeledContent("Size", value: size) }
                     if recording.ruleId != nil { LabeledContent("Scheduled by", value: String(localized: "A recurring rule")) }
                     if let error = recording.visibleError {
                         Text(error).foregroundStyle(.red)
                     }
                 }
+                if let notice = recording.captureNotice {
+                    Section {
+                        Text(notice).font(.callout).foregroundStyle(.secondary)
+                        if let capture = recording.capture, capture.supported {
+                            ForEach(capture.gaps.indices, id: \.self) { index in
+                                Text(capture.gaps[index].label).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        ForEach(recording.playableParts) { part in
+                            Button(part.label) {
+                                let original = APIClient.shared.sourceContext()
+                                RecordingPlayback.playPart(recording, index: part.index, context: original, dismissPresented: true)
+                            }
+                            .accessibilityIdentifier("recording.part.\(part.index)")
+                        }
+                    } header: { Text("Captured parts") }
+                }
                 Section {
                     if recording.canPlay {
                         Button { perform(.play) } label: {
-                            Label(recording.status == .running ? "Play In Progress" : "Play", systemImage: "play.fill")
+                            Label(recording.singleActivePart != nil ? "Play active captured part" : recording.capturePresent ? "Choose captured part" : recording.status == .running ? "Play In Progress" : "Play", systemImage: "play.fill")
                         }
                         .accessibilityIdentifier("recording.play")
                     }

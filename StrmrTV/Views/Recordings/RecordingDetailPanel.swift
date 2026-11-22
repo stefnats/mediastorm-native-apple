@@ -27,6 +27,7 @@ struct RecordingDetailPanel: View {
             if let error = recording.visibleError {
                 Text(error).font(.callout).foregroundStyle(.red).lineLimit(3)
             }
+            captureDetails
             actions.padding(.top, 20)
         }
     }
@@ -34,7 +35,7 @@ struct RecordingDetailPanel: View {
     private var actions: some View {
         VStack(alignment: .leading, spacing: 18) {
             if recording.canPlay {
-                button(.play, recording.status == .running ? "Play in Progress" : "Play Recording", "play.fill")
+                button(.play, recording.singleActivePart != nil ? "Play active captured part" : recording.capturePresent ? "Choose captured part" : recording.status == .running ? "Play in Progress" : "Play Recording", "play.fill")
             }
             if recording.canCancel {
                 button(.cancel, recording.status == .running ? "Stop Recording" : "Cancel Scheduled Recording",
@@ -50,6 +51,24 @@ struct RecordingDetailPanel: View {
         .disabled(busy)
     }
 
+    @ViewBuilder private var captureDetails: some View {
+        if let notice = recording.captureNotice {
+            Text(notice).font(.caption).foregroundStyle(.secondary)
+        }
+        if let capture = recording.capture, capture.supported {
+            ForEach(capture.gaps.indices, id: \.self) { index in
+                Text(capture.gaps[index].label).font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(recording.playableParts) { part in
+                Button(part.label) {
+                    RecordingPlayback.playPart(recording, index: part.index, context: APIClient.shared.sourceContext())
+                }
+                .disabled(busy)
+                .accessibilityIdentifier("recording-part-\(part.index)")
+            }
+        }
+    }
+
     private func button(_ action: RecordingAction, _ title: LocalizedStringKey, _ symbol: String) -> some View {
         Button { perform(action) } label: {
             Label(title, systemImage: symbol).frame(minWidth: 480, alignment: .leading)
@@ -60,7 +79,8 @@ struct RecordingDetailPanel: View {
 
     /// Duration, and the file's size once something is recorded.
     private var facts: String {
-        [recording.durationText, recording.sizeText].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · ")
+        let duration = recording.durationText.isEmpty ? nil : String(localized: "Scheduled window: \(recording.durationText)")
+        return [duration, recording.sizeText].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · ")
     }
 
     private var statusColor: Color {
