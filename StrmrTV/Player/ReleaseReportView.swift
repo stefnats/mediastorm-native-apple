@@ -8,6 +8,7 @@ struct ReleaseReportView: View {
     let position: Double
     let onPlay: (ReleaseReportModel.Transfer, ReleaseAlternativeStart) -> Void
     let onClose: () -> Void
+    var audioCheck: SpokenAudioModel? = nil
     @State private var reason = ReleaseReportReason.fileProblem
     @State private var audioTrack: Int?
     @State private var alternativeStart = ReleaseAlternativeStart.current
@@ -21,6 +22,9 @@ struct ReleaseReportView: View {
                     Text(options.releaseName).font(.headline)
                     Text("The report applies to this title and selected source. Language and audio-track problems retain their narrower scope.")
                         .font(.caption).foregroundStyle(.secondary)
+                    if options.audioLanguageCheckAvailable == true, let audioCheck {
+                        SpokenAudioCheckView(model: audioCheck, options: options)
+                    }
                     if options.canShare {
                         Text("Your server may share title reports with other profiles. Profile and device problems keep their narrower scope.")
                             .font(.caption).foregroundStyle(.secondary)
@@ -88,7 +92,7 @@ struct ReleaseReportView: View {
         .onAppear {
             if model.options == nil { model.load() }
         }
-        .onDisappear { model.close() }
+        .onDisappear { audioCheck?.close(); model.close() }
         #if os(tvOS)
         .onExitCommand { model.close(); onClose() }
         #endif
