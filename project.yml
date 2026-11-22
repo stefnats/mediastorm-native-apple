@@ -179,6 +179,7 @@ targets:
     platform: iOS
     sources:
       - path: StrmrTVTests/LiveAdmissionIntegrationTests.swift
+      - path: StrmrTVTests/WatchRoomPlaybackTests.swift
     dependencies:
       - target: StrmrMobile
     settings:

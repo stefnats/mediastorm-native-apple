@@ -9,6 +9,7 @@ extension MobileDetailsView {
         VStack(spacing: 18) {
             primaryRow
             ContentLocalPreferenceView(target: target)
+            WatchTogetherButton(title: target, episode: model.activeEpisode)
             HStack(alignment: .top, spacing: 4) {
                 MobileActionItem(caption: String(localized: "Sources")) {
                     Button { model.chooseSource(for: model.activeEpisode) } label: {
