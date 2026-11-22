@@ -1,57 +1,89 @@
 import UIKit
 
-/// Coming back from the background, as the Expo app does: the profile picker comes up again
-/// (server setting `display.alwaysShowProfileSelector`, on by default), and with it off a
-/// PIN profile asks for its PIN again after five minutes away. Neither happens for the
-/// "Use Automatically" profile, over the player, or after a moment away (under 2 s).
 extension AppSession {
-    static let resumePickerMinimumAway: TimeInterval = 2
-    static let resumePINExpiry: TimeInterval = 5 * 60
-
     func observeBackgroundForResumeLock() {
         let center = NotificationCenter.default
         center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                if self.backgroundedAt == nil { self.backgroundedAt = Date() }
-            }
+            MainActor.assumeIsolated { self?.resumeGate.backgrounded() }
         }
         center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.applyResumeLock() }
         }
     }
 
-    /// Re-reads the server setting so the next resume decides without waiting on the network.
     func refreshResumeLockSetting() {
         struct Display: Decodable { let alwaysShowProfileSelector: Bool? }
         struct Settings: Decodable { let display: Display? }
+        let owner = resumeOwner
         Task {
-            guard let settings: Settings = try? await api.send("GET", "/api/settings", promptOnLock: false, timeout: 10)
-            else { return }
+            guard let settings: Settings = try? await api.send("GET", "/api/settings", promptOnLock: false, timeout: 10),
+                  owner == resumeOwner else { return }
             alwaysShowProfileSelector = settings.display?.alwaysShowProfileSelector ?? true
         }
     }
 
-    private func applyResumeLock() {
-        guard let since = backgroundedAt else { return }
-        backgroundedAt = nil
-        let away = Date().timeIntervalSince(since)
-        guard phase == .ready, pinChallenge == nil, let current = profile, current.id != autoProfileID,
-              !PlaybackCoordinator.shared.isPresentingPlayer
-        else { return }
+    var resumeOwner: ResumePINOwner {
+        ResumePINOwner(context: api.sourceContext(), activation: resumeActivation, session: api.token)
+    }
 
-        if alwaysShowProfileSelector, profiles.count > 1, away > Self.resumePickerMinimumAway {
-            print("[AppSession] resume after \(Int(away)) s: profile picker")
-            profilePickRequired = current.requiresPin
-            Task { await switchProfile() }
-        } else if current.requiresPin, away >= Self.resumePINExpiry {
-            print("[AppSession] resume after \(Int(away)) s: PIN for \(current.name)")
-            // Cancel goes to the picker (`unlockLockedProfile`), which can't then be backed out of.
-            profilePickRequired = true
-            Task {
-                if await unlockLockedProfile(current.id) { profilePickRequired = false }
+    /// Unlike the existing VOD-only coordinator predicate, this covers every
+    /// actual protected player host without changing unrelated playback policy.
+    static func isProtectedPlaybackType(_ type: UIViewController.Type) -> Bool {
+        type.isSubclass(of: EnginePlayerViewController.self) || type.isSubclass(of: MultiscreenHostController.self)
+    }
+
+    var hasProtectedPlaybackPresentation: Bool {
+        if PlaybackCoordinator.shared.resolving != nil { return true }
+        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+            var current = scene.windows.first(where: \.isKeyWindow)?.rootViewController
+            while let controller = current {
+                if Self.isProtectedPlaybackType(type(of: controller)) { return true }
+                current = controller.presentedViewController
             }
         }
+        return false
+    }
+
+    private func applyResumeLock() {
+        guard phase == .ready, let current = profile else { return }
+        let action = resumeGate.foreground(owner: resumeOwner, requiresPIN: current.requiresPin,
+            player: hasProtectedPlaybackPresentation, automatic: current.id == autoProfileID,
+            showPicker: alwaysShowProfileSelector, profileCount: profiles.count)
+        applyResumeAction(action)
         refreshResumeLockSetting()
+    }
+
+    /// UIKit dismissal and both roots call this after their synchronous lifecycle
+    /// work. A source handoff or another presented player retains the obligation.
+    func playbackReturnedToBrowsing() {
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self, phase == .ready, let current = profile else { return }
+            let action = resumeGate.browsing(owner: resumeOwner, requiresPIN: current.requiresPin,
+                                             player: hasProtectedPlaybackPresentation)
+            applyResumeAction(action)
+        }
+    }
+
+    private func applyResumeAction(_ action: DeferredResumeGate.Action) {
+        protectedBrowsingBlocked = resumeGate.blocked
+        switch action {
+        case .none, .deferred: return
+        case .picker:
+            profilePickRequired = profile?.requiresPin == true
+            Task { await switchProfile() }
+        case let .pin(ticket):
+            profilePickRequired = true
+            Task { [weak self] in
+                guard let self else { return }
+                let unlocked = await unlockLockedProfile(ticket.owner.context.profileID)
+                if unlocked, resumeGate.complete(ticket, owner: resumeOwner) {
+                    profilePickRequired = false
+                } else {
+                    resumeGate.release(ticket)
+                }
+                protectedBrowsingBlocked = resumeGate.blocked
+            }
+        }
     }
 }
