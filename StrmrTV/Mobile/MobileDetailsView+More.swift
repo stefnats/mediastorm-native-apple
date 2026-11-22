@@ -7,6 +7,7 @@ import SwiftUI
 extension MobileDetailsView {
     var moreMenu: some View {
         Menu {
+            ReminderEntryButton(target: target, title: model.title, seasons: model.seasons)
             if !target.isMovie, !model.seasons.isEmpty {
                 Section {
                     Button { model.shuffle(season: nil) } label: { Label("Shuffle Show", systemImage: "shuffle") }

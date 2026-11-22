@@ -19,6 +19,7 @@ extension DetailsView {
     var moreMenu: some View {
         Menu {
             movedActions
+            ReminderEntryButton(target: target, title: title, seasons: seasons)
             let setAside = titles.setAsideItem(target) != nil
             if titles.inContinueWatching(target) {
                 if !setAside {
