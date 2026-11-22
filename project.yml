@@ -173,6 +173,21 @@ targets:
         TEST_TARGET_NAME: StrmrMobile
         GENERATE_INFOPLIST_FILE: YES
         TARGETED_DEVICE_FAMILY: "1,2"
+  # The live admission tests also exercise iOS-only Cast ownership paths.
+  StrmrMobileTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: StrmrTVTests/LiveAdmissionIntegrationTests.swift
+    dependencies:
+      - target: StrmrMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.strmr.app.nx.mobile.tests
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/StrmrMobile.app/StrmrMobile
+        BUNDLE_LOADER: $(TEST_HOST)
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
   StrmrTVUITests:
     type: bundle.ui-testing
     platform: tvOS
@@ -209,4 +224,4 @@ schemes:
       targets:
         StrmrMobile: all
     test:
-      targets: [StrmrMobileUITests]
+      targets: [StrmrMobileUITests, StrmrMobileTests]

@@ -1,6 +1,10 @@
 import Foundation
 import XCTest
+#if os(iOS)
+@testable import StrmrMobile
+#else
 @testable import StrmrTV
+#endif
 
 private final class LiveHTTPExchange: @unchecked Sendable {
     let entered = XCTestExpectation(description: "Actual URLSession live start entered")
