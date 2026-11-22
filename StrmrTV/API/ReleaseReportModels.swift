@@ -15,6 +15,7 @@ struct ReleaseReportOptions: Decodable, Sendable {
     let canShare: Bool
     let hasEpisode: Bool
     let canResetHistory: Bool
+    var audioLanguageCheckAvailable: Bool? = nil
 
     func allows(_ reason: ReleaseReportReason) -> Bool {
         switch reason {

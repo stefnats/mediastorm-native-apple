@@ -18,6 +18,16 @@ extension PlayerViewController {
             subtitleStatus.show(String(localized: "Profile or connection changed. Reopen playback before reporting."), hideAfter: 5)
             return
         }
+        let originalPath = currentSource.streamPath
+        let spoken = SpokenAudioModel(id: id, context: context) { [weak self] in
+            guard let self, !self.didFinish, !self.engine.isLive, !self.playsDownload,
+                  self.currentSource.prequeueID == id, self.currentSource.streamPath == originalPath,
+                  self.currentSource.viewerContext == context, self.pendingAudioPick == nil,
+                  let track = self.engine.activeAudioTrackIndex,
+                  self.engine.audioTracks.contains(where: { $0.id == track && !$0.isExternal }),
+                  self.engine.currentTime.isFinite, self.engine.currentTime >= 0 else { return nil }
+            return SpokenAudioModel.Selection(track: track, position: self.engine.currentTime)
+        }
         let model = ReleaseReportModel(prequeueID: id, context: context, progressOwner: self)
         releaseReportModel?.close()
         releaseReportModel = model
@@ -29,7 +39,7 @@ extension PlayerViewController {
                     return
                 }
                 self.playReportedAlternative(transfer: transfer, start: start, context: model.context)
-            }, onClose: { [weak self] in self?.presentedViewController?.dismiss(animated: true) }))
+            }, onClose: { [weak self] in spoken.close(); self?.presentedViewController?.dismiss(animated: true) }, audioCheck: spoken))
         host.modalPresentationStyle = .overFullScreen
         present(host, animated: true)
     }
