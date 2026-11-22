@@ -72,12 +72,13 @@ final class PersonalArtworkStore {
 
 @MainActor @Observable
 final class ContentArtworkModel {
-    let title: Title
+    private(set) var title: Title
     let context: SourceActionContext
     private(set) var preference: ContentArtworkPreference?
     private(set) var busy = false
     private(set) var message: String?
     private(set) var confirmation: String?
+    private(set) var needsGalleryReload = false
     private let api: any ContentArtworkAPI
     private let store: PersonalArtworkStore
     private var closed = false
@@ -92,7 +93,7 @@ final class ContentArtworkModel {
         guard !closed, api.isCurrent(context) else { throw CancellationError() }
     }
     func load() async {
-        guard !busy, !closed else { return }
+        guard !busy, !closed, !needsGalleryReload else { return }
         busy = true; message = nil; confirmation = nil; preference = nil
         defer { busy = false }
         do {
@@ -107,8 +108,33 @@ final class ContentArtworkModel {
             if !value.supported { message = String(localized:"Personal pictures are unavailable on this server.") }
         } catch { if !closed, !Task.isCancelled, api.isCurrent(context) { message = PersonalTasteError.message(error) } }
     }
+    /// An explicit metadata read renews the server's delivered gallery. Only
+    /// after a second confirmed preference read do the new choices become usable.
+    /// No previously attempted choice is carried forward or saved automatically.
+    func reloadGallery() async {
+        guard !busy, !closed, needsGalleryReload else { return }
+        busy = true; message = nil; confirmation = nil; preference = nil
+        defer { busy = false }
+        let original = title
+        do {
+            try check()
+            let delivered = try await api.reloadContentArtworkTitle(original,context:context)
+            let fresh = try ContentArtworkWire.confirmGallery(delivered,original:original)
+            try check()
+            let revision = store.revision
+            let value = try await api.readContentArtwork(original.id,context:context)
+            try check()
+            guard value.supported, value.contentId == nil || value.contentId == ContentArtworkWire.key(original.id),
+                  value.contentId != nil || value.choice(.poster) == nil && value.choice(.backdrop) == nil else { throw PersonalTasteError.unavailable }
+            store.confirmRead(context,titleID:original.id,readRevision:revision,value:value)
+            title = fresh; preference = value; needsGalleryReload = false
+            confirmation = String(localized:"Title pictures reloaded. Choose a picture explicitly.")
+        } catch {
+            if !closed, !Task.isCancelled, api.isCurrent(context) { message = PersonalTasteError.message(error) }
+        }
+    }
     func save(kind: ContentArtworkKind, url: String?) async {
-        guard !busy, !closed, preference?.supported == true else { return }
+        guard !busy, !closed, !needsGalleryReload, preference?.supported == true else { return }
         guard ContentArtworkWire.options(title,kind:kind).contains(where:{$0.url == url}) else { return }
         busy = true; message = nil; confirmation = nil
         defer { busy = false }
@@ -122,6 +148,7 @@ final class ContentArtworkModel {
             confirmation = url == nil ? String(localized:"Standard picture restored for this profile.") : String(localized:"Picture saved for this profile.")
         } catch {
             preference = nil // Do not automatically retry an unacknowledged field update.
+            if (error as? APIError)?.statusCode == 409 { needsGalleryReload = true }
             if !closed, !Task.isCancelled, api.isCurrent(context) { message = PersonalTasteError.message(error) }
         }
     }

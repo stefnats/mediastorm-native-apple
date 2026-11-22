@@ -41,6 +41,13 @@ enum ContentArtworkWire {
         guard PersonalTasteWire.valid(title), options(title,kind:kind).contains(where:{$0.url == url}) else { throw PersonalTasteError.unavailable }
         return ["contentId":title.id,"contentType":title.isMovie ? "movie" : "series",kind.rawValue:url.map { $0 as Any } ?? NSNull()]
     }
+    static func confirmGallery(_ value: Title, original: Title) throws -> Title {
+        guard PersonalTasteWire.valid(value), value.id == original.id, value.mediaType == original.mediaType else { throw PersonalTasteError.unavailable }
+        if let expected = original.imdbId, let actual = value.imdbId, expected != actual { throw PersonalTasteError.unavailable }
+        if let expected = original.tmdbId, let actual = value.tmdbId, expected != actual { throw PersonalTasteError.unavailable }
+        if let expected = original.tvdbId, let actual = value.tvdbId, expected != actual { throw PersonalTasteError.unavailable }
+        return value
+    }
     @MainActor static func request(_ title: Title, kind: ContentArtworkKind, url: String?, context: SourceActionContext) throws -> URLRequest {
         let request = try context.request("PUT",path:PersonalTasteWire.path(context)+"/content-preferences/artwork",body:body(title,kind:kind,url:url))
         guard request.httpBody.map({ $0.count <= 8192 }) == true else { throw PersonalTasteError.unavailable }
@@ -55,9 +62,39 @@ protocol ContentArtworkAPI: AnyObject {
     func readContentArtwork(_ id: String, context: SourceActionContext) async throws -> ContentArtworkPreference
     func readAllContentArtwork(_ context: SourceActionContext) async throws -> [ContentArtworkPreference]
     func setContentArtwork(_ title: Title, kind: ContentArtworkKind, url: String?, context: SourceActionContext) async throws -> ContentArtworkPreference
+    func reloadContentArtworkTitle(_ title: Title, context: SourceActionContext) async throws -> Title
+}
+
+extension ContentArtworkAPI {
+    /// Older/test adapters remain unavailable rather than silently claiming a
+    /// preference read refreshed the delivered metadata gallery.
+    func reloadContentArtworkTitle(_ title: Title, context: SourceActionContext) async throws -> Title {
+        throw PersonalTasteError.unavailable
+    }
 }
 
 extension APIClient: ContentArtworkAPI {
+    static func artworkTitleRequest(_ title: Title, context: SourceActionContext) throws -> URLRequest {
+        guard PersonalTasteWire.valid(title) else { throw PersonalTasteError.unavailable }
+        var request = try context.request("GET",path:title.isMovie ? "/api/metadata/movies/details" : "/api/metadata/series/details")
+        guard let url = request.url, var parts = URLComponents(url:url,resolvingAgainstBaseURL:false) else { throw PersonalTasteError.unavailable }
+        var query = ["titleId":title.id,"name":title.name,"userId":context.profileID]
+        query["year"] = title.year.map(String.init); query["tmdbId"] = title.tmdbId.map(String.init)
+        query["tvdbId"] = title.tvdbId.map(String.init); query["imdbId"] = title.imdbId
+        parts.queryItems = (parts.queryItems ?? []) + query.sorted { $0.key < $1.key }.map { URLQueryItem(name:$0.key,value:$0.value) }
+        request.url = parts.url
+        guard request.url != nil else { throw PersonalTasteError.unavailable }
+        return request
+    }
+    func reloadContentArtworkTitle(_ title: Title, context: SourceActionContext) async throws -> Title {
+        try Task.checkCancellation(); try requireSourceContext(context)
+        let raw = try await sendOriginalSourceAction(Self.artworkTitleRequest(title,context:context))
+        try Task.checkCancellation(); try requireSourceContext(context)
+        let fresh: Title
+        if title.isMovie { fresh = try decoder.decode(Title.self,from:raw) }
+        else { fresh = try decoder.decode(SeriesDetails.self,from:raw).title }
+        return try ContentArtworkWire.confirmGallery(fresh,original:title)
+    }
     func readContentArtwork(_ id: String, context: SourceActionContext) async throws -> ContentArtworkPreference {
         try requireSourceContext(context)
         let request = try context.request("GET",path:PersonalTasteWire.path(context)+"/preferences/content/\(Self.segment(id))")
