@@ -55,6 +55,7 @@ struct Title: Decodable, Identifiable, Hashable {
     var cardImage: ImageRef?
     /// Keep the shelf context readable where the layout hides card text.
     var forceTitleOverlay: Bool?
+    @SourceHintField var sourceAvailability: SourceAvailability?
 
     var isMovie: Bool { mediaType == "movie" }
 }
@@ -147,6 +148,7 @@ struct Episode: Decodable, Identifiable, Hashable {
     let resume: ResumeState?
     /// The ordering these numbers are in (stamped by the server on every episode).
     var numbering: EpisodeNumbering?
+    @SourceHintField var sourceAvailability: SourceAvailability?
 
     var code: String { String(format: "S%02dE%02d", seasonNumber, episodeNumber) }
 }

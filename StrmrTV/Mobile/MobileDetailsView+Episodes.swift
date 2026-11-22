@@ -176,6 +176,8 @@ struct MobileEpisodeCard: View {
                 .overlay(Image(systemName: "film").font(.title2).foregroundStyle(.tertiary))
         }
         .frame(width: Self.imageSize.width, height: Self.imageSize.height)
+        .sourceHintDimming(episode.sourceAvailability,inLibrary:inLibrary)
+        .overlay(alignment:.bottomLeading) { SourceHintBadge(value:episode.sourceAvailability,inLibrary:inLibrary).padding(6) }
         .blur(radius: hidesThumbnail ? 24 : 0, opaque: true)
         .clipShape(Self.shape)
         .overlay(alignment: .topLeading) {

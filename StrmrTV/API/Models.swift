@@ -165,6 +165,7 @@ struct CardEpisode: Hashable {
 // MARK: - Continue watching
 
 struct ContinueWatchingItem: Decodable, Identifiable, Hashable {
+    @SourceHintField var sourceAvailability: SourceAvailability?
     let seriesId: String
     let seriesTitle: String
     let overview: String?
@@ -217,6 +218,7 @@ struct DisplayListPage<Item: Decodable & Sendable>: Decodable, Sendable {
 /// A watchlist entry (`display-list?source=watchlist`). `id` is the server's canonical
 /// ID; pass it back verbatim to remove the item.
 struct WatchlistItem: Decodable, Identifiable, Hashable {
+    @SourceHintField var sourceAvailability: SourceAvailability?
     let id: String
     /// movie | series
     let mediaType: String
@@ -268,6 +270,7 @@ extension String {
 
 /// A title hidden from the profile (`/users/{id}/hidden-items`).
 struct HiddenItem: Decodable, Identifiable, Hashable {
+    @SourceHintField var sourceAvailability: SourceAvailability?
     let id: String
     /// movie | series
     let mediaType: String

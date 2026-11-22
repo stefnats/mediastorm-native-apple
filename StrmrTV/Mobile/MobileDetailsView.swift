@@ -37,6 +37,7 @@ struct MobileDetailsView: View {
                     VStack(alignment: .leading, spacing: 22) {
                         headerText
                         if let title = model.title { PersonalTitleActions(title: title).id(title.id) }
+                        SourceHintBadge(value:model.title?.sourceAvailability)
                         actionsSection
                         prequeueSection
                         if !target.isMovie { episodesSection }
@@ -59,7 +60,7 @@ struct MobileDetailsView: View {
             ToolbarItem(placement: .topBarTrailing) { moreMenu }
         }
         .task { await model.load() }
-        .onAppear { if automaticallyPrewarm { playback.prewarm(target) } }
+        .onAppear { if automaticallyPrewarm && !target.suppressAutomaticSourcePreparation { playback.prewarm(target) } }
         .onChange(of: playback.sessionsEnded) {
             model.prequeueOverrides = (nil, ManualTrackOverrides())
             Task { await model.load() }

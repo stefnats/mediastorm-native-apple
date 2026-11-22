@@ -11,9 +11,11 @@ struct HeroContent: Equatable {
     /// A streaming service's (or art-less hub's) logo, drawn large at the top right on
     /// black in place of a backdrop, as the Expo home does; the title is then the name.
     var framedLogoURL: String?
+    var sourceAvailability: SourceAvailability?
 
     @MainActor init(_ original: HomeCard, artwork: PersonalArtworkStore = .shared) {
         let card = original.personalArtwork(using:artwork)
+        sourceAvailability = card.sourceAvailability
         id = card.id
         title = card.title
         subtitle = card.subtitle
@@ -90,9 +92,12 @@ struct HeroInfo: View {
                 titleArea(logo: CGSize(width: m.logo.width * textScale, height: m.logo.height * textScale),
                           titleSize: m.title)
             }
-            Text(hero?.subtitle ?? " ")
-                .font(.system(size: m.line * textScale, weight: .medium))
-                .lineLimit(1)
+            HStack(spacing:12) {
+                Text(hero?.subtitle ?? " ")
+                    .font(.system(size: m.line * textScale, weight: .medium))
+                    .lineLimit(1)
+                SourceHintBadge(value:hero?.sourceAvailability)
+            }
             if m.lines > 0 {
                 Text(hero?.overview ?? " ")
                     .font(.system(size: m.overview * textScale))

@@ -42,6 +42,7 @@ struct HomeCarousel: View {
         // crossfades in over the old where it stands, and nothing moves.
         ZStack(alignment: .bottomLeading) {
             HomeCarouselInfo(card: current, rowTitle: shelf.title, textScale: textScale)
+                .overlay(alignment:.topTrailing) { SourceHintBadge(value:current?.sourceAvailability) }
                 .id(current?.id)
                 .transition(.opacity)
         }

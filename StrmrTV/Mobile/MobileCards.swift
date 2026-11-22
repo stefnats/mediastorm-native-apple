@@ -86,6 +86,8 @@ struct MobileCardArt: View {
     var body: some View {
         face
             .frame(width: size.width, height: size.height)
+            .sourceHintDimming(card.sourceAvailability)
+            .overlay(alignment:.topTrailing) { SourceHintBadge(value:card.sourceAvailability).padding(6) }
             .clipShape(RoundedRectangle(cornerRadius: MobileCardMetrics.cornerRadius, style: .continuous))
             .overlay(alignment: .topLeading) {
                 if card.symbol == nil, !card.logoTile {

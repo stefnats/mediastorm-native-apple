@@ -19,6 +19,9 @@ struct DetailsTarget: Hashable {
     let overview: String?
     /// Opened from a library card: the page plays the library's copy, so it starts no prequeue.
     var fromLibrary = false
+    /// Captured presentation decision from a fresh missing-source hint at tap.
+    /// This never grants playback and never disables explicit source selection.
+    var suppressAutomaticSourcePreparation = false
 
     init(titleID: String, name: String, isMovie: Bool, year: Int?, tmdbID: String?, imdbID: String?,
          tvdbID: String?, posterURL: String?, textPosterURL: String?, backdropURL: String?,

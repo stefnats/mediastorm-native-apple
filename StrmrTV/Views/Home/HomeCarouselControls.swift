@@ -59,8 +59,11 @@ struct HomeCarouselControls: View {
     private var buttons: some View {
         HStack(spacing: 28) {
             Button { act("play", play) } label: {
-                Label((current?.progress ?? 0) > 0 ? String(localized: "Resume") : String(localized: "Play"),
-                      systemImage: "play.fill")
+                TimelineView(.periodic(from:.now,by:1)) { tick in
+                    let missing = current?.sourceAvailability?.presentation(at:tick.date).dimArtwork == true
+                    Label(missing ? String(localized:"Details") : ((current?.progress ?? 0) > 0 ? String(localized: "Resume") : String(localized: "Play")),
+                          systemImage: missing ? "info.circle" : "play.fill")
+                }
             }
             .focused(focused, equals: HomeCarousel.focus(.play))
             .overlay(alignment: .leading) {
@@ -127,14 +130,16 @@ struct HomeCarouselControls: View {
     /// As the details page's Play: opens the title's details, which start what Play there
     /// would (resume, or the next episode) once they load.
     private func play() {
-        guard let target = current?.target else { return }
+        guard let original = current?.target else { return }
+        let target = SourceHintNavigation.target(original,hint:current?.sourceAvailability)
         HomeCarousel.log.info("play \(target.titleID) from \(shelf.id)")
-        DeepLinkRouter.shared.armAutoplay(target.titleID)
+        if SourceHintNavigation.autoplay(primary:true,target:target) { DeepLinkRouter.shared.armAutoplay(target.titleID) }
         openDetails(target)
     }
 
     private func openInfo() {
-        guard let target = current?.target else { return }
+        guard let original = current?.target else { return }
+        let target = SourceHintNavigation.target(original,hint:current?.sourceAvailability)
         HomeCarousel.log.info("details \(target.titleID) from \(shelf.id)")
         openDetails(target)
     }

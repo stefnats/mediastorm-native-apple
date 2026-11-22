@@ -256,7 +256,7 @@ struct DetailsView: View {
         // Not in the navigation destination: that runs during a view update, so its publish
         // re-ran every destination on the stack, and two details pages prewarming in turn
         // never settled (a page opened from More Like This froze the app).
-        .onAppear { if automaticallyPrewarm { playback.prewarm(target) } }
+        .onAppear { if automaticallyPrewarm && !target.suppressAutomaticSourcePreparation { playback.prewarm(target) } }
         .task { await infoLineStore.refresh() }
         .task { await load() }
         .onReceive(DeepLinkRouter.shared.$autoplayTitleID) { _ in autoplayIfRequested() }
@@ -331,6 +331,7 @@ struct DetailsView: View {
             if let ratings = title?.ratings, !ratings.isEmpty { RatingsRow(ratings: ratings) }
 
             if let title { PersonalTitleActions(title: title).id(title.id) }
+            SourceHintBadge(value:title?.sourceAvailability)
 
             if let overview {
                 // Up from the actions reaches it only when it is cut off; select shows it whole.

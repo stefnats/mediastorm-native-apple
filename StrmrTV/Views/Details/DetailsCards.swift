@@ -93,6 +93,8 @@ struct EpisodeCard: View {
                     image.resizable().aspectRatio(contentMode: .fill)
                 } placeholder: { Rectangle().fill(.quaternary) }
                 .frame(width: 400, height: 225)
+                .sourceHintDimming(episode.sourceAvailability,inLibrary:inLibrary)
+                .overlay(alignment:.topTrailing) { SourceHintBadge(value:episode.sourceAvailability,inLibrary:inLibrary).padding(10) }
                 // Opaque, so the blur doesn't fade into the page at the edges.
                 .blur(radius: hidesThumbnail ? 36 : 0, opaque: true)
                 .overlay(alignment: .bottom) {

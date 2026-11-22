@@ -19,6 +19,7 @@ struct PosterCard: View {
     var onRemoveFromList: (() -> Void)?
     /// Off on a kids profile's details rows, where (as in the Expo app) titles don't open.
     var opens = true
+    var sourceAvailability: SourceAvailability?
 
     /// Drives the lift. The style's `\.isFocused` environment goes stale when focus comes back
     /// from a modal (e.g. the Add to List sheet), leaving a focused card un-lifted.
@@ -31,6 +32,7 @@ struct PosterCard: View {
         self.width = width
         self.opens = opens
         target = DetailsTarget(title)
+        sourceAvailability = title.sourceAvailability
         badge = rank.map { CardBadge(text: "#\($0)") } ?? ReleaseBadge.forTitle(title)
         watchBadge = CardBadge.forWatchState(title.watchState)
         unwatchedCount = title.isMovie ? nil : title.unwatchedCount
@@ -41,6 +43,7 @@ struct PosterCard: View {
     init(hidden item: HiddenItem, width: CGFloat = PosterCard.width) {
         self.width = width
         target = DetailsTarget(item)
+        sourceAvailability = item.sourceAvailability
         badge = nil
         subtitle = Self.subtitle(year: item.year, isMovie: item.isMovie)
     }
@@ -49,6 +52,7 @@ struct PosterCard: View {
         self.width = width
         self.onRemoveFromList = onRemoveFromList
         target = DetailsTarget(item)
+        sourceAvailability = item.sourceAvailability
         badge = ReleaseBadge.forTitle(item)
         watchBadge = CardBadge.forWatchState(item.watchState)
         unwatchedCount = item.isMovie ? nil : item.unwatchedCount
@@ -90,6 +94,8 @@ struct PosterCard: View {
         .overlay(alignment: .topLeading) {
             ArtworkBadges(badge: badge, watch: watchBadge, unwatchedCount: unwatchedCount).padding(10)
         }
+        .sourceHintDimming(sourceAvailability)
+        .overlay(alignment:.bottomLeading) { SourceHintBadge(value:sourceAvailability).padding(8) }
     }
 
     static func artURL(_ target: DetailsTarget, artwork: PersonalArtworkStore = .shared) -> URL? {
