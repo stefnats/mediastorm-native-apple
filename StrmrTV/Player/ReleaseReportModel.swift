@@ -79,9 +79,17 @@ final class ReleaseReportModel: ObservableObject {
                     try Task.checkCancellation()
                     guard !closed, api.isCurrent(context) else { return }
                 }
-                actionSent = true
-                let reply = try await api.submitReleaseAction(prequeueID, options: options,
-                                                              submission: submission, context: context)
+                // A UI cancellation must not cancel URLSession.data(for:) after
+                // POST admission and discard an observable late replacement ID.
+                // This one owned task is joined by operation and close cleanup;
+                // its transport has a real 30-second resource timeout, no replay.
+                let mutation = Task { [self] in
+                    guard !closed, api.isCurrent(context) else { throw CancellationError() }
+                    actionSent = true
+                    return try await api.submitReleaseAction(prequeueID, options: options,
+                                                             submission: submission, context: context)
+                }
+                let reply = try await mutation.value
                 acknowledged = true
                 let lease: ReleaseReplacementOwnership.Lease?
                 if let next = reply.replacement, let reservation {

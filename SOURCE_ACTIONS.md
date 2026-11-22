@@ -96,3 +96,12 @@ All normal, warm and prefetched prequeue requests use the same capability-bound
 `automaticLibrarySelection` builder. Old servers receive no unknown extension
 field. Cast progress retains its original viewer and physical-file/catalogue key,
 including when the phone changes profile while casting.
+
+Closing the dialog cancels its preflight/readiness work, but an already admitted
+POST runs in a separately owned task until the actual bounded HTTP response or
+transport error. Cleanup joins that task before handling any late replacement ID.
+Only source actions use a dedicated URLSession with a 30-second resource timeout;
+ordinary API authentication/refresh behavior is unchanged. URLProtocol-backed
+XCTest covers actual async URLSession cancellation as a positive control and the
+closed-dialog late-ACK/DELETE path. Those tests are authored but not run locally.
+A real transport timeout still has an unknown remote outcome and is never replayed.

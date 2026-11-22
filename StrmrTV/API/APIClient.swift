@@ -43,6 +43,18 @@ final class APIClient: ObservableObject {
         return URLSession(configuration: config)
     }()
 
+    /// Only source-bound actions use this bounded transport. Ordinary API
+    /// refresh, PIN prompts and recovery retain their original session.
+    static func sourceActionConfiguration() -> URLSessionConfiguration {
+        let config = URLSessionConfiguration.default
+        config.httpMaximumConnectionsPerHost = 16
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 30
+        return config
+    }
+
+    private static let sourceActionHTTP = URLSession(configuration: sourceActionConfiguration())
+
     let decoder = JSONDecoder()
     private let encoder: JSONEncoder = {
         let e = JSONEncoder()
@@ -236,7 +248,7 @@ final class APIClient: ObservableObject {
     /// No refresh, PIN adoption, transport rebase or application-level replay.
     /// A lost acknowledgement stays unknown; the caller must not resubmit it.
     func sendOriginalSourceAction(_ request: URLRequest) async throws -> Data {
-        let (data, response) = try await Self.http.data(for: request)
+        let (data, response) = try await Self.sourceActionHTTP.data(for: request)
         guard let response = response as? HTTPURLResponse else {
             throw APIError.notReady("The server response could not be confirmed")
         }
