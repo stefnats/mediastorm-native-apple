@@ -235,17 +235,20 @@ extension LiveAdmissionIntegrationTests {
         let receiver=Receiver()
         var session=CastController.Session(device:receiver.device,title:"Synthetic",subtitle:nil,artworkURL:nil)
         session.isLive=true
-        var pending:CheckedContinuation<CastController.Prepared,Error>?
-        let opening=Task {await cast.begin(session) {try await withCheckedThrowingContinuation {pending=$0}}}
+        var pending:CheckedContinuation<Void,Error>?
+        let opening=Task {await cast.begin(session) {
+            try await withCheckedThrowingContinuation {pending=$0}
+            var media=CastMedia(url:URL(string:"https://synthetic.invalid/never-open")!,contentType:"video/mp2t",title:"Synthetic",subtitle:nil,posterURL:nil,duration:nil,startPosition:0)
+            media.isLive=true
+            return CastController.Prepared(transport:receiver,media:media,hlsSessionID:nil,playback:nil,liveContext:self.context())
+        }}
         for _ in 0..<100 where pending == nil {await Task.yield()}
         XCTAssertNotNil(pending)
         var stopped=false
         let stop=Task {await cast.finish(reason:"synthetic user stop",stopReceiver:true);stopped=true}
         for _ in 0..<10 {await Task.yield()}
         XCTAssertFalse(stopped)
-        var media=CastMedia(url:URL(string:"https://synthetic.invalid/never-open")!,contentType:"video/mp2t",title:"Synthetic",subtitle:nil,posterURL:nil,duration:nil,startPosition:0)
-        media.isLive=true
-        pending?.resume(returning:CastController.Prepared(transport:receiver,media:media,hlsSessionID:nil,playback:nil,liveContext:context()));pending=nil
+        pending?.resume(returning:());pending=nil
         await opening.value;await stop.value
         XCTAssertTrue(stopped)
         XCTAssertEqual(receiver.loads,0)
@@ -261,9 +264,10 @@ extension LiveAdmissionIntegrationTests {
         let cast = CastController.shared
         await cast.finish(reason:"synthetic setup", stopReceiver:true)
         let old = Receiver(), a = Receiver(), b = Receiver()
-        var pending: CheckedContinuation<CastController.Prepared, Error>?
+        var pending: CheckedContinuation<Void, Error>?
         let x = Task { await cast.begin(.init(device:old.device,title:"X",subtitle:nil,artworkURL:nil)) {
             try await withCheckedThrowingContinuation { pending = $0 }
+            return self.prepared(old)
         } }
         for _ in 0..<100 where pending == nil { await Task.yield() }
         XCTAssertNotNil(pending)
@@ -271,7 +275,7 @@ extension LiveAdmissionIntegrationTests {
         for _ in 0..<10 { await Task.yield() }
         let newest = Task { await cast.begin(.init(device:b.device,title:"B",subtitle:nil,artworkURL:nil)) { self.prepared(b) } }
         for _ in 0..<10 { await Task.yield() }
-        pending?.resume(returning:prepared(old)); pending = nil
+        pending?.resume(returning:()); pending = nil
         await x.value; await first.value; await newest.value
         XCTAssertEqual(a.loads,0); XCTAssertEqual(b.loads,1)
         XCTAssertEqual(b.stops,0); XCTAssertTrue(cast.transport === b)
