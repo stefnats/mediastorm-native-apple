@@ -9,17 +9,19 @@ extension CastController {
     /// switched, network moved: none of these announce themselves).
     private static let failureLimit = 8
 
-    func startPolling() {
+    func startPolling(wait: @escaping () async throws -> Void = { try await Task.sleep(for: .seconds(1)) }) {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             var failures = 0
             var ticks = 0
             var sawPlayback = false
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
+                try? await wait()
                 guard let self, let transport = self.transport, !Task.isCancelled else { return }
                 ticks += 1
-                guard let state = await transport.status() else {
+                let observed = await transport.status()
+                guard !Task.isCancelled, self.transport === transport else { return }
+                guard let state = observed else {
                     failures += 1
                     if failures >= Self.failureLimit {
                         await self.finish(reason: "receiver stopped answering", stopReceiver: false)
@@ -74,15 +76,29 @@ extension CastController {
 
     /// The server reaps an HLS session that goes quiet for a minute, and a paused receiver
     /// fetches nothing.
-    private func keepAlive() {
+    func keepAlive(heartbeat: ((String, SourceActionContext, Bool) async throws -> Void)? = nil) {
         guard let id = hlsSessionID else { return }
         if let context = liveStartContext {
             guard liveKeepalive == nil else { return }
+            let generation = castStartGeneration, owner = UUID(), originalTransport = transport
+            let paused = session?.state.phase == .paused
+            liveKeepaliveID = owner
             liveKeepalive = Task { [weak self] in
                 guard let self else { return }
-                defer { liveKeepalive = nil }
-                do { try await APIClient.shared.keepLiveSessionAliveStrict(id, context: context, paused: session?.state.phase == .paused) }
-                catch { Task { await self.finish(reason: "live session denied", stopReceiver: true) } }
+                defer {
+                    if liveKeepaliveID == owner { liveKeepalive = nil; liveKeepaliveID = nil }
+                }
+                do {
+                    if let heartbeat { try await heartbeat(id, context, paused) }
+                    else { try await APIClient.shared.keepLiveSessionAliveStrict(id, context: context, paused: paused) }
+                } catch {
+                    guard generation == castStartGeneration, hlsSessionID == id, liveStartContext == context,
+                          transport === originalTransport else { return }
+                    // This tracked request owns its denial cleanup. A replacement
+                    // joins it; it cannot launch a later detached stop against B.
+                    await finish(reason: "live session denied", stopReceiver: true,
+                                 expectedGeneration: generation, joinKeepalive: false)
+                }
             }
             return
         }
@@ -94,20 +110,31 @@ extension CastController {
     }
 
     /// Ends the cast: progress saved, the receiver stopped (when asked), the server session let go.
-    func finish(reason: String, stopReceiver: Bool, ended: Bool = false, cancelStarting: Bool = true) async {
+    func finish(reason: String, stopReceiver: Bool, ended: Bool = false, cancelStarting: Bool = true,
+                expectedGeneration: UUID? = nil, joinKeepalive: Bool = true) async {
+        if let expectedGeneration, expectedGeneration != castStartGeneration { return }
         if cancelStarting { castStartGeneration = UUID() }
+        let generation = castStartGeneration
         let pendingStart = startTask
         startTask = nil
         pendingStart?.cancel()
         await pendingStart?.value
+        guard generation == castStartGeneration else { return }
+        await receiverStop?.value
+        guard generation == castStartGeneration else { return }
         pollTask?.cancel()
         pollTask = nil
         let pendingKeepalive = liveKeepalive
-        liveKeepalive = nil
-        await pendingKeepalive?.value
+        if joinKeepalive {
+            await pendingKeepalive?.value
+            guard generation == castStartGeneration else { return }
+        }
         // Nothing running: a failed attempt stays on the remote until it is dismissed.
         guard let transport else {
-            if let id = hlsSessionID, let context = liveStartContext { await stopCastHLS(id, context: context) }
+            if let id = hlsSessionID, let context = liveStartContext {
+                await stopCastHLS(id, context: context, expectedGeneration: generation)
+            }
+            guard generation == castStartGeneration else { return }
             if hlsSessionID == nil {
                 liveStartContext = nil
                 session = nil
@@ -118,8 +145,15 @@ extension CastController {
         log.notice("cast to \(transport.device.name) ended: \(reason)")
         reportProgress(ended: ended)
         self.transport = nil
-        if stopReceiver { await transport.stop() }
-        if let id = hlsSessionID { await stopCastHLS(id, context: liveStartContext) }
+        if stopReceiver {
+            let owner = UUID(), stop = Task { await transport.stop() }
+            receiverStopID = owner; receiverStop = stop
+            await stop.value
+            if receiverStopID == owner { receiverStop = nil; receiverStopID = nil }
+        }
+        guard generation == castStartGeneration else { return }
+        if let id = hlsSessionID { await stopCastHLS(id, context: liveStartContext, expectedGeneration: generation) }
+        guard generation == castStartGeneration else { return }
         if liveStartContext != nil, hlsSessionID != nil { return }
         hlsSessionID = nil
         liveStartContext = nil

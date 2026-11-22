@@ -118,7 +118,7 @@ extension CastController {
                 log.notice("DLNA live: HLS session")
                 return (media(opened.url, hlsInfo), opened.sessionID)
             }
-            if let id = opened.sessionID { try await APIClient.shared.stopLiveSessionStrict(id, context: attempt.context) }
+            if let id = opened.sessionID { await retireUnsupportedLiveHLS(id, context: attempt.context) }
         } else if takesHLS {
             // 2. A cast HLS session.
             let opened = try await openLive(channel, program: program, forceHLS: true, attempt: attempt)
@@ -126,6 +126,13 @@ extension CastController {
             return (media(opened.url, hlsInfo), opened.sessionID)
         }
         throw CastError(String(localized: "\(transport.device.name) can't play this channel's stream."))
+    }
+
+    /// A rejected but actually opened HLS reply already owns cleanup, even when
+    /// prepare cannot return a receiver-compatible Prepared value.
+    func retireUnsupportedLiveHLS(_ id: String, context: SourceActionContext) async {
+        hlsSessionID = id; liveStartContext = context
+        await stopCastHLS(id, context: context)
     }
 }
 #endif

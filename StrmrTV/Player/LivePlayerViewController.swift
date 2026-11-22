@@ -33,9 +33,10 @@ final class LivePlayerViewController: EnginePlayerViewController {
     var channel: LiveChannel
     let program: EPGProgram?
     let api = APIClient.shared
+    let liveContext: SourceActionContext
 
     lazy var liveAttempt: LivePlaybackAttempt = {
-        let context = api.sourceContext()
+        let context = liveContext
         return LivePlaybackAttempt(context: context, current: { [weak self] in
             self?.didFinish == false && APIClient.shared.isCurrent(context)
         })
@@ -111,6 +112,7 @@ final class LivePlayerViewController: EnginePlayerViewController {
     init(engine: AetherEngine, channel: LiveChannel, program: EPGProgram?) {
         self.channel = channel
         self.program = program
+        liveContext = APIClient.shared.sourceContext()
         super.init(engine: engine, logCategory: "live")
     }
 
@@ -178,7 +180,7 @@ final class LivePlayerViewController: EnginePlayerViewController {
                 endSession()
                 try await retiring?.value
                 if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
-                let forceHLS = await hlsForTune()
+                let forceHLS = try await liveAttempt.prepare { await self.hlsForTune() }
                 let start = try await api.startLive(channel, programTitle: program?.title, forceHLS: forceHLS, attempt: liveAttempt, automatic: automatic)
                 // Record the receipt before observing cancellation, so even a
                 // departure at this return boundary has an owned stop path.

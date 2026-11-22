@@ -45,6 +45,15 @@ final class LivePlaybackAttempt {
     func isCurrent() -> Bool { !stopped && current() }
     var canAutomaticallyRetry: Bool { !stopped && !uncertain }
 
+    /// Preference/identity lookup is preparation under the original viewer,
+    /// never a place to capture replacement credentials after an await.
+    func prepare(_ preference: () async -> Bool) async throws -> Bool {
+        guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
+        let value = await preference()
+        guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
+        return value
+    }
+
     func open(_ channel: LiveChannel, automaticIntent: Bool = false,
               confirm: @escaping (LiveRecordingChallenge, Duration) async -> Bool,
               fetch: @escaping (String, String?, Bool) async throws -> LiveStart,

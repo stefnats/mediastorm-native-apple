@@ -43,6 +43,12 @@ final class CastController: ObservableObject {
     var castStartGeneration = UUID()
     var liveStartContext: SourceActionContext?
     var liveKeepalive: Task<Void, Never>?
+    var liveKeepaliveID: UUID?
+    var receiverStop: Task<Void, Never>?
+    var receiverStopID: UUID?
+    var stopLiveHLS: (String, SourceActionContext) async throws -> Void = { id, context in
+        try await APIClient.shared.stopLiveSessionStrict(id, context: context)
+    }
     var pollTask: Task<Void, Never>?
     private var searchTask: Task<Void, Never>?
     var startTask: Task<Void, Never>?

@@ -20,12 +20,14 @@ extension CastController {
         let generation = UUID()
         castStartGeneration = generation
         let previous = startTask
-        startTask = nil
         previous?.cancel()
         await previous?.value
+        guard generation == castStartGeneration, !Task.isCancelled else { return }
+        startTask = nil
         let device = session.device
-        await finish(reason: "replaced by a new cast", stopReceiver: transport?.device.id != device.id, cancelStarting: false)
-        guard generation == castStartGeneration, liveStartContext == nil || hlsSessionID == nil else { return }
+        await finish(reason: "replaced by a new cast", stopReceiver: transport?.device.id != device.id,
+                     cancelStarting: false, expectedGeneration: generation)
+        guard generation == castStartGeneration, !Task.isCancelled, liveStartContext == nil || hlsSessionID == nil else { return }
         self.session = session
         CastPresenter.showRemote()
         let task = Task {
@@ -73,16 +75,18 @@ extension CastController {
         await task.value
     }
     /// Cleanup is independently owned even when the requesting start was cancelled.
-    func stopCastHLS(_ id: String, context: SourceActionContext?) async {
+    func stopCastHLS(_ id: String, context: SourceActionContext?, expectedGeneration: UUID? = nil) async {
         let cleanup = Task { () -> Bool in
             if let context {
-                do { try await APIClient.shared.stopLiveSessionStrict(id, context: context); return true }
+                do { try await self.stopLiveHLS(id, context); return true }
                 catch { return false }
             }
             await APIClient.shared.stopLiveSession(id)
             return true
         }
-        if await cleanup.value {
+        let stopped = await cleanup.value
+        if let expectedGeneration, expectedGeneration != castStartGeneration { return }
+        if stopped {
             if hlsSessionID == id { hlsSessionID = nil; liveStartContext = nil }
         } else {
             // Retain the known creator and ID. Another explicit Cast/Stop may
