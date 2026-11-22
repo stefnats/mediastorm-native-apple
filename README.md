@@ -5,7 +5,7 @@ server. Playback uses [AetherEngine](https://github.com/superuser404notfound/Aet
 
 ## Building
 
-Requires a current Xcode and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+Requires Xcode 27 or newer (Swift 6.4+) and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
 ```sh
 xcodegen generate

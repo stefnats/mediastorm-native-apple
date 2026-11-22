@@ -19,9 +19,10 @@ concurrency:
 
 jobs:
   simulator-tests:
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 90
     env:
+      DEVELOPER_DIR: /Applications/Xcode_27.app/Contents/Developer
       SOURCE_REF: ${{ inputs.source_ref || github.sha }}
     defaults:
       run:
@@ -50,7 +51,10 @@ jobs:
           import pathlib,re
           text=pathlib.Path('artifacts/swift-version.txt').read_text()
           match=re.search(r'Swift version (\d+)\.(\d+)',text)
-          assert match and tuple(map(int,match.groups())) >= (6,2), 'Swift 6.2+ is required by existing @concurrent APIs'
+          assert match and tuple(map(int,match.groups())) >= (6,4), 'Pinned AetherEngine 7.47.0 requires Swift 6.4+'
+          xcode=pathlib.Path('artifacts/xcode-version.txt').read_text()
+          match=re.search(r'Xcode (\d+)',xcode)
+          assert match and int(match.group(1)) >= 27, 'Pinned AetherEngine 7.47.0 requires Xcode 27+'
           PY
           if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
           xcodegen --version | tee artifacts/xcodegen-version.txt
@@ -99,7 +103,7 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath .build/derived-data \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee artifacts/ios-build.log
-      - name: Run hosted iPhone live admission unit tests
+      - name: Run hosted iPhone shared unit suite
         run: |
           set -euo pipefail
           export TMPDIR="$GITHUB_WORKSPACE/.build/temporary"

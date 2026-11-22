@@ -40,20 +40,25 @@ Existing test files are preserved.
 `.github/workflows/apple-source-actions.yml` runs only on an explicit manual
 `workflow_dispatch` or a push to the dedicated `feature/integrated-requirements`
 branch. Manual dispatch requires a reviewed immutable commit; a branch push pins
-its actual commit. The job records actual tools, requires Swift 6.2+
-(the upstream API already uses `@concurrent`), generates the actual Xcode project,
+its actual commit. The job records actual tools, requires Xcode 27 and Swift 6.4+
+(as required by the pinned AetherEngine 7.47.0 release), generates the actual Xcode project,
 selects an installed available tvOS 18+ Apple TV simulator, runs `StrmrTVTests`, and
 compiles `StrmrMobile` for the iOS simulator. It preserves logs and the xcresult.
 It does not publish apps, install on real devices, create releases or push source.
-The workflow has not been dispatched or pushed by the author.
+The first published run used Xcode 26.6 / Swift 6.3.3 and failed while compiling
+the pinned player dependency, before application tests could run. The workflow
+now uses the same `xcode-27` runner as the dependency's own CI, selects its
+installed Xcode 27.0 toolchain, and checks the actual Xcode and Swift versions before generating the project. No dependency
+sources, compiler isolation checks or test assertions are changed to bypass that
+failure.
 
-The public runner image reference reviewed while preparing this workflow is
-[GitHub's macOS 26 image](https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md).
-Its documented default was Xcode 26.6; the workflow records and checks the actual
-selected compiler rather than assuming that an older Xcode supports this source.
+The required toolchain is documented in
+[AetherEngine 7.47.0 requirements](https://github.com/superuser404notfound/AetherEngine/blob/7.47.0/README.md#requirements)
+and its [release CI](https://github.com/superuser404notfound/AetherEngine/blob/7.47.0/.github/workflows/ci.yml).
+GitHub documents the [Xcode 27 runner](https://github.com/actions/runner-images/blob/main/images/macos/xcode-27-arm64-Readme.md).
 AetherEngine remains the existing exact 7.47.0 dependency, and Google Cast remains
-exact 4.8.6. Future CI resolves those existing dependencies and includes the
-tracked Iroh framework; the local sparse source checkout excludes its large blobs.
+exact 4.8.6. CI resolves those existing dependencies and includes the tracked Iroh
+framework; the local sparse source checkout excludes its large blobs.
 
 ## Combined episode files
 
