@@ -259,6 +259,8 @@ struct SubtitleExtractStart: Decodable {
 
 /// The server's answer to a progress report: whether it wants the player off this source.
 struct ProgressReply: Decodable {
+    var itemId: String?
+    var mediaType: String?
     var migrationRequested: Bool?
     var migrationReason: String?
 }

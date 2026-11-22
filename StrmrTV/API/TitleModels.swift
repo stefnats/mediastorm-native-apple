@@ -32,6 +32,8 @@ struct Title: Decodable, Identifiable, Hashable {
     let runtimeMinutes: Int?
     let genres: [String]?
     let status: String?
+    var lifecycleStatus: String?
+    var personalRating: String?
     let theatricalRelease: Release?
     let homeRelease: Release?
     /// `YYYY-MM-DD` the title first becomes watchable.

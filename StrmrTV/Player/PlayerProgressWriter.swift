@@ -36,6 +36,7 @@ final class PlayerProgressWriter {
     private let api: any PlayerProgressAPI
     private weak var observer: (any PlayerProgressObserver)?
     private var writes: [UUID: Task<Void, Never>] = [:]
+    private var completion: Task<Result<PostPlayCompletion, Error>, Never>?
 
     init(viewer: SourceActionContext, api: any PlayerProgressAPI = APIClient.shared,
          observer: (any PlayerProgressObserver)? = nil) {
@@ -71,13 +72,43 @@ final class PlayerProgressWriter {
         accepting = false
         let pending = Array(writes.values)
         for write in pending { await write.value }
+        if let completion { _ = await completion.value }
         if requireKnownAcknowledgements && hasUnconfirmedWrite {
             throw APIError.notReady("A previous progress write is unconfirmed. History cannot safely be reset from this playback.")
         }
     }
 
+    /// Completion is a final ordered write after every earlier admitted request.
+    /// An unknown acknowledgement is not retried or converted into a watched mark.
+    func complete(_ body: [String: Any]) async throws -> PostPlayCompletion {
+        try await beginCompletion(body).value.get()
+    }
+    func beginCompletion(_ body: [String: Any]) -> Task<Result<PostPlayCompletion, Error>, Never> {
+        if let completion { return completion }
+        let current = api.sourceContext()
+        guard accepting, viewer.sameViewer(as: current), body["playbackEnded"] as? Bool == true,
+              let kind = body["mediaType"] as? String, ["movie", "episode"].contains(kind) else { return Task { .failure(PostPlayFailure.completion) } }
+        accepting = false
+        let pending = Array(writes.values)
+        let task = Task<Result<PostPlayCompletion, Error>, Never> { [self] in
+            for write in pending { await write.value }
+            guard !hasUnconfirmedWrite, viewer.sameViewer(as: api.sourceContext()) else { return .failure(PostPlayFailure.completion) }
+            let background = UIApplication.shared.beginBackgroundTask(withName: "completed-progress")
+            defer { if background != .invalid { UIApplication.shared.endBackgroundTask(background) } }
+            guard let reply = await api.reportOriginalProgress(body, context: current), reply.mediaType == kind,
+                  let item = reply.itemId, !item.isEmpty, item.utf8.count <= 512,
+                  !item.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+                hasUnconfirmedWrite = true; return .failure(PostPlayFailure.completion)
+            }
+            return .success(PostPlayCompletion(context: current, itemID: item, mediaType: kind))
+        }
+        completion = task
+        return task
+    }
+
     func waitForWrites() async {
         let pending = Array(writes.values)
         for write in pending { await write.value }
+        if let completion { _ = await completion.value }
     }
 }

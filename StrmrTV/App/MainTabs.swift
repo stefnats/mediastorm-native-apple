@@ -46,6 +46,7 @@ struct MainTabs: View {
         }
         .modifier(MenuStyleModifier(style: menuStyle.style))
         .modifier(HomeViewTabs(tabs: self))
+        .modifier(PostPlayPresentation())
         .environmentObject(watchlist)
         .environmentObject(customLists)
         .environmentObject(titles)
