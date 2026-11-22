@@ -16,14 +16,22 @@ struct MobileSourcePicker: View {
     let onPick: (SourceResult, ManualTrackPick?) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var results: [SourceResult] = []
-    @State private var isLoading = true
-    @State private var error: String?
-    @State private var health: [Int: SourceHealth] = [:]
+    @StateObject private var filter: SourceFilterModel
+    @State private var filterControls = false
+    private var results: [SourceResult] { filter.rows.map(\.result) }
+    private var isLoading: Bool { filter.loading }
+    private var error: String? { filter.error }
+    private var health: [Int: SourceHealth] { filter.health }
     @State private var trackPreferences = ManualTrackPreferences()
     @State private var trackOverrides: [Int: ManualTrackOverrides] = [:]
     @State private var probes: [Int: SourceTrackProbe] = [:]
     @State private var tracksTarget: TracksTarget?
+
+    init(title: DetailsTarget, episode: Episode?, heading: String, libraryVersions: [LibraryVersion] = [], contentPreference: ContentPreference?, onPickLibrary: @escaping (LibraryVersion) -> Void = { _ in }, onPick: @escaping (SourceResult, ManualTrackPick?) -> Void) {
+        self.title = title; self.episode = episode; self.heading = heading; self.libraryVersions = libraryVersions
+        self.contentPreference = contentPreference; self.onPickLibrary = onPickLibrary; self.onPick = onPick
+        _filter = StateObject(wrappedValue: SourceFilterModel(title: title, episode: episode))
+    }
 
     struct TracksTarget: Identifiable, Hashable {
         let result: SourceResult
@@ -35,12 +43,14 @@ struct MobileSourcePicker: View {
     var body: some View {
         NavigationStack {
             List {
+                Section { SourceFilterStatus(model: filter, controls: $filterControls) }
                 if !libraryVersions.isEmpty {
                     Section(libraryVersions.count == 1 ? String(localized: "In your libraries")
                                                        : String(localized: "\(libraryVersions.count) in your libraries")) {
                         ForEach(libraryVersions) { version in
                             Button {
-                                dismiss()
+                                guard filter.permitsLibrary else { return }
+                                filter.close(); dismiss()
                                 onPickLibrary(version)
                             } label: {
                                 LibraryVersionRow(version: version)
@@ -54,11 +64,16 @@ struct MobileSourcePicker: View {
             .navigationTitle(heading)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { filter.close(); dismiss() } }
             }
             .navigationDestination(item: $tracksTarget) { target in tracksPage(target.result) }
         }
         .task { await load() }
+        .onDisappear { if tracksTarget == nil && !filterControls { filter.close() } }
+        .onChange(of: filter.page?.viewId) { probes = [:]; trackOverrides = [:] }
+        .onChange(of: filter.latestEvidence) { before, after in
+            for (index, evidence) in after where before[index]?.sourceVersion != evidence.sourceVersion { trackOverrides[index] = nil }
+        }
     }
 
     @ViewBuilder
@@ -67,7 +82,7 @@ struct MobileSourcePicker: View {
             if isLoading {
                 HStack(spacing: 12) {
                     ProgressView()
-                    Text("Searching sources…").foregroundStyle(.secondary)
+                    Text(filter.supported ? "Reading saved source view…" : "Searching sources…").foregroundStyle(.secondary)
                 }
             } else if let error {
                 ContentUnavailableView("Search Failed", systemImage: "exclamationmark.triangle",
@@ -75,24 +90,25 @@ struct MobileSourcePicker: View {
             } else if results.isEmpty {
                 ContentUnavailableView("No Sources Found", systemImage: "magnifyingglass")
             } else {
-                ForEach(results, id: \.index) { result in
+                ForEach(filter.rows) { row in
+                    let result = row.result
                     Button {
-                        dismiss()
-                        onPick(result, pick(for: result))
+                        choose(row)
                     } label: {
-                        SourceRow(result: result, health: health[result.index],
-                                  hasTrackPicks: !(trackOverrides[result.index]?.isEmpty ?? true))
+                        VStack(alignment: .leading, spacing: 6) {
+                                SourceRow(result: result, health: health[result.index], hasTrackPicks: !(trackOverrides[result.index]?.isEmpty ?? true))
+                                if filter.supported { Text(SourceFilterLabels.verdict(row.verdict, basis: filter.page?.filters.basis ?? "candidate")).font(.footnote).foregroundStyle(.secondary) }
+                            }
                     }
                     .tint(.primary)
                     .contextMenu {
                         Button {
-                            dismiss()
-                            onPick(result, pick(for: result))
+                            choose(row)
                         } label: { Label("Play", systemImage: "play.fill") }
-                        Button { showTracks(result) } label: { Label("Audio & Subtitles…", systemImage: "waveform") }
+                        Button { showTracks(row) } label: { Label("Audio & Subtitles…", systemImage: "waveform") }
                     }
                     .swipeActions(edge: .trailing) {
-                        Button { showTracks(result) } label: { Label("Tracks", systemImage: "waveform") }
+                        Button { showTracks(row) } label: { Label("Tracks", systemImage: "waveform") }
                             .tint(.indigo)
                     }
                 }
@@ -116,23 +132,25 @@ struct MobileSourcePicker: View {
                                set: { trackOverrides[index] = $0 }),
             playLabel: String(localized: "Play"), inSheet: false
         ) { pick in
-            close()
-            onPick(result, pick)
+            guard let selected = filter.takeManual(result) else { return }
+            filter.close(); close()
+            onPick(selected, pick)
         }
     }
 
     // MARK: Tracks
 
-    private func showTracks(_ result: SourceResult) {
-        SourceTracksModel.log.notice("tracks: \(result.serviceType) \"\(result.title)\" (cached probe \(probes[result.index] != nil))")
-        tracksTarget = TracksTarget(result: result)
+    private func showTracks(_ row: SourceFilterRow) {
+        guard let result = filter.beginManual(row) else { return }; tracksTarget = TracksTarget(result: result)
     }
-
+    private func choose(_ row: SourceFilterRow) {
+        guard let selected = filter.take(row) else { return }
+        let tracks = pick(for: row.result); filter.close(); dismiss(); onPick(selected, tracks)
+    }
     private func record(_ probe: SourceTrackProbe, for result: SourceResult) {
+        guard result.filterSelection?.current == true else { return }
         if !probe.audio.isEmpty || !probe.subtitles.isEmpty { probes[result.index] = probe }
-        let debrid = result.serviceType.lowercased() == "debrid"
-        let state = probe.playable ? (debrid ? "cached" : "healthy") : (debrid ? "not_cached" : "unhealthy")
-        setHealth(SourceHealth(state: state, token: nil), at: result.index)
+        filter.recordProbe(result, probe: probe)
     }
 
     private func pick(for result: SourceResult) -> ManualTrackPick? {
@@ -141,39 +159,13 @@ struct MobileSourcePicker: View {
         return ManualTrackPick(overrides: overrides, audio: probe.audio, subtitles: probe.subtitles)
     }
 
-    // MARK: Search and health
-
-    private var query: String {
-        SourceSearch.query(name: title.name, year: title.year,
-                           episode: episode.map { ($0.seasonNumber, $0.episodeNumber) })
-    }
-
-    private func setHealth(_ value: SourceHealth, at index: Int) {
-        health[index] = value
-        SourceSearch.updateHealth(title: title, query: query, numbering: episode?.numbering, index: index, health: value)
-    }
-
     private func load() async {
-        Task { trackPreferences = await ManualTrackPreferences.current(content: contentPreference) }
+        filter.appear()
+        guard filter.current else { return }
         do {
-            results = try await SourceSearch.search(title: title, query: query, numbering: episode?.numbering)
-            health = SourceSearch.initialHealth(results)
-        } catch {
-            self.error = error.localizedDescription
-        }
-        isLoading = false
-        let tokens = Set(health.values.filter { $0.state == "pending" }.compactMap(\.token))
-        for token in tokens {
-            var complete = false
-            while !complete, !Task.isCancelled {
-                guard let snapshot = try? await APIClient.shared.sourceHealth(token: token) else { break }
-                for entry in snapshot.results { setHealth(entry.health, at: entry.index) }
-                complete = snapshot.complete
-            }
-        }
-        if !Task.isCancelled {
-            for (index, h) in health where h.state == "pending" { setHealth(SourceHealth(state: "unknown", token: nil), at: index) }
-        }
+            let preferences = try await ManualTrackPreferences.current(content: contentPreference, context: filter.context)
+            guard filter.current else { return }; trackPreferences = preferences
+        } catch { filter.preferenceFailed(error) }
     }
 }
 #endif

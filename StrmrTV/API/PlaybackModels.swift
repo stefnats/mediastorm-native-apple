@@ -16,10 +16,15 @@ struct SourceResult: Identifiable, @unchecked Sendable {
     let attributes: [String: String]
     /// Debrid cache / usenet health annotation (`includeSourceHealth=true`).
     let health: SourceHealth?
+    let snapshotID: String?
+    let candidateVersion: String?
+    /// Local picker receipt; never serialized into the provider result.
+    var filterSelection: SourceFilterSelection?
 
-    init?(_ raw: [String: Any], index: Int) {
+    init?(_ raw: [String: Any], index: Int, snapshotID: String? = nil, candidateVersion: String? = nil) {
         guard let title = raw["title"] as? String else { return nil }
         self.raw = raw
+        self.snapshotID = snapshotID; self.candidateVersion = candidateVersion
         self.index = index
         health = (raw["sourceHealth"] as? [String: Any]).flatMap(SourceHealth.init)
         self.title = title

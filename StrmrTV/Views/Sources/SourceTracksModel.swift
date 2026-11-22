@@ -42,6 +42,41 @@ extension ManualTrackPreferences {
             allowedLanguages: store.server.allowedLanguages,
             losslessAudio: store.losslessAudio)
     }
+
+    /// The actual source sheets read their existing preference endpoints with
+    /// the original viewer. Do not publish into the shared settings store.
+    @MainActor
+    static func current(content: ContentPreference?, context: SourceActionContext) async throws -> ManualTrackPreferences {
+        struct Playback: Decodable {
+            let preferredSubtitleMode: String?
+            let preferredSubtitleLanguage: String?
+            let preferredAudioLanguage: String?
+            let allowedTrackLanguages: [String]?
+        }
+        struct User: Decodable { let playback: Playback? }
+        let api = APIClient.shared, store = TrackSettingsStore.shared
+        let localAudio = store.audioLanguage, localSubtitle = store.subtitleLanguage, localMode = store.subtitleMode, lossless = store.losslessAudio
+        func read<T: Decodable>(_ type: T.Type, path: String, query: [String: String] = [:]) async throws -> T? {
+            do {
+                let request = try APIClient.sourceFilterRequest(context, method: "GET", path: path, query: query)
+                let data = try await api.sourceFilterData(request, context: context)
+                return try JSONDecoder().decode(type, from: data)
+            } catch {
+                if error.isCancellation || !api.isCurrent(context) || [401, 403].contains((error as? APIError)?.statusCode ?? 0) { throw error }
+                return nil
+            }
+        }
+        let user = try await read(User.self, path: "/api/users/\(APIClient.segment(context.profileID))/settings")?.playback
+        let device = try await read(Playback.self, path: "/api/clients/\(APIClient.segment(context.clientID))/settings", query: ["userId": context.profileID])
+        try api.requireSourceContext(context); try Task.checkCancellation()
+        func first(_ values: String?...) -> String { values.lazy.compactMap { $0 }.first { !$0.isEmpty } ?? "" }
+        let mode = first(localMode, content?.subtitleMode, device?.preferredSubtitleMode, user?.preferredSubtitleMode)
+        return ManualTrackPreferences(audioLanguage: first(localAudio, content?.audioLanguage, device?.preferredAudioLanguage, user?.preferredAudioLanguage),
+            subtitleLanguage: first(localSubtitle, content?.subtitleLanguage, device?.preferredSubtitleLanguage, user?.preferredSubtitleLanguage),
+            subtitleMode: TrackSettingsStore.normalizeMode(mode.isEmpty ? "off" : mode) ?? "off",
+            allowedLanguages: device?.allowedTrackLanguages ?? user?.allowedTrackLanguages ?? [], losslessAudio: lossless)
+    }
+
 }
 
 /// Probes one source for its tracks on a long press in the source picker, polling while a
@@ -63,10 +98,14 @@ final class SourceTracksModel: ObservableObject {
     /// The release name the page heads with.
     let releaseName: String
     private var task: Task<Void, Never>?
+    private let api: any SourceFilterAPI
+    private let context: SourceActionContext
+    private var generation = 0
     /// Called with each finished probe, so the picker can cache it and update the row's badge.
     private let onProbe: (SourceTrackProbe) -> Void
 
-    init(result: SourceResult, cached: SourceTrackProbe?, onProbe: @escaping (SourceTrackProbe) -> Void) {
+    init(result: SourceResult, cached: SourceTrackProbe?, api: any SourceFilterAPI = APIClient.shared, onProbe: @escaping (SourceTrackProbe) -> Void) {
+        self.api = api; context = result.filterSelection?.context ?? api.sourceContext()
         self.result = result
         let name = result.attributes["raw_title"] ?? result.title
         releaseName = name.components(separatedBy: "\n").first ?? result.title
@@ -76,6 +115,7 @@ final class SourceTracksModel: ObservableObject {
 
     /// The prequeued stream's lists, as the details page's Audio & Subtitles shows them.
     init(releaseName: String, tracks: SourceTrackProbe) {
+        api = APIClient.shared; context = APIClient.shared.sourceContext()
         result = nil
         self.releaseName = releaseName
         onProbe = { _ in }
@@ -89,23 +129,29 @@ final class SourceTracksModel: ObservableObject {
 
     func start() {
         guard probe == nil, let result else { return }
-        task?.cancel()
+        task?.cancel(); generation += 1
+        let owner = generation, api = api, context = context
+        guard api.isCurrent(context), result.filterSelection?.current != false else { return }
         state = .loading
         task = Task { [weak self] in
             let started = Date()
             Self.log.notice("probe start: \(result.serviceType) \"\(result.title)\"")
             do {
-                var probe = try await APIClient.shared.probeTracks(result)
+                guard let self, self.generation == owner, api.isCurrent(context), result.filterSelection?.current != false, !Task.isCancelled else { return }
+                var probe = try await api.probeTracks(result, context: context)
                 var polls = 0
                 while probe.tracksLoading, polls < 45, !Task.isCancelled {
+                    guard self.generation == owner, api.isCurrent(context), result.filterSelection?.current != false else { return }
                     polls += 1
                     try await Task.sleep(for: .seconds(2))
-                    probe = try await APIClient.shared.probeTracks(result)
+                    guard self.generation == owner, api.isCurrent(context), result.filterSelection?.current != false, !Task.isCancelled else { return }
+                    probe = try await api.probeTracks(result, context: context)
                 }
-                guard let self, !Task.isCancelled else { return }
+                guard !Task.isCancelled, self.generation == owner, api.isCurrent(context), result.filterSelection?.current != false else { return }
                 let elapsed = String(format: "%.1f", Date().timeIntervalSince(started))
                 Self.log.notice("probe done in \(elapsed)s: playable=\(probe.playable) audio=\(probe.audio.count) "
                     + "subtitles=\(probe.subtitles.count) polls=\(polls) error=\(probe.error ?? "-")")
+                result.filterSelection?.probed(probe)
                 self.onProbe(probe)
                 if probe.audio.isEmpty, probe.subtitles.isEmpty {
                     self.state = .failed(probe.tracksLoading
@@ -117,7 +163,8 @@ final class SourceTracksModel: ObservableObject {
             } catch is CancellationError {
                 return
             } catch {
-                guard let self, !Task.isCancelled else { return }
+                guard let self, !Task.isCancelled, self.generation == owner, api.isCurrent(context), result.filterSelection?.current != false else { return }
+                result.filterSelection?.failed(error)
                 Self.log.error("probe failed: \(error.localizedDescription)")
                 self.state = .failed(error.localizedDescription)
             }
@@ -125,6 +172,8 @@ final class SourceTracksModel: ObservableObject {
     }
 
     func cancel() {
+        result?.filterSelection?.closed()
+        generation += 1
         task?.cancel()
         task = nil
     }
