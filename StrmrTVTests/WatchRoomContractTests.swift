@@ -20,7 +20,7 @@ enum WatchRoomFixture {
         return ["id":id,"creatorProfileId":joined ? "original" : "host","creatorName":joined ? "Original" : "Host","title":"Synthetic",
             "mediaType":episode ? "episode" : "movie","itemId":target.itemID,"params":target.params,"status":status,
             "waitingForReady":waiting,"position":position,"duration":duration,"revision":revision,
-            "anchorUpdatedAt":"2026-11-22T12:00:00Z","expiresAt":"2026-11-23T12:00:00Z","members":[member]]
+            "anchorUpdatedAt":"2026-11-22T12:00:00Z","expiresAt":ISO8601DateFormatter().string(from:Date.now.addingTimeInterval(86_400)),"members":[member]]
     }
     static func data(_ fields: [String:Any]? = nil) throws -> Data {
         try JSONSerialization.data(withJSONObject:fields ?? Self.fields())
@@ -30,7 +30,7 @@ enum WatchRoomFixture {
     }
     static func invite() throws -> WatchRoomAccountInvite {
         try JSONDecoder().decode(WatchRoomAccountInvite.self,from:JSONSerialization.data(withJSONObject:[
-            "id":inviteID,"roomId":id,"status":"pending","expiresAt":"2026-11-23T12:00:00Z","title":"Synthetic"]))
+            "id":inviteID,"roomId":id,"status":"pending","expiresAt":ISO8601DateFormatter().string(from:Date.now.addingTimeInterval(86_400)),"title":"Synthetic"]))
     }
 }
 

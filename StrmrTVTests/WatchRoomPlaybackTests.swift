@@ -24,7 +24,7 @@ private enum WatchRoomPlaybackFixture {
         ["id":id,"creatorProfileId":"original","creatorName":"Original","title":"Synthetic","mediaType":"movie",
          "itemId":target().itemID,"params":target().params,"status":status,"waitingForReady":waiting,
          "position":position,"duration":100,"revision":revision,"anchorUpdatedAt":"2026-11-22T12:00:00Z",
-         "expiresAt":"2026-11-23T12:00:00Z","members":[["profileId":"original","name":"Original","clientId":"client",
+         "expiresAt":ISO8601DateFormatter().string(from:Date.now.addingTimeInterval(86_400)),"members":[["profileId":"original","name":"Original","clientId":"client",
             "isCreator":true,"ready":true,"buffering":false,"joined":true,"present":true,"capabilities":WatchRoomWire.capabilities]]]
     }
     static func data(_ fields: [String:Any]? = nil) throws -> Data { try JSONSerialization.data(withJSONObject:fields ?? Self.fields()) }
