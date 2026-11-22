@@ -26,7 +26,7 @@ final class StoredMediaFixtureAPI: StoredMediaAPI {
 
 @MainActor
 final class StoredMediaBrowseFlowTests: XCTestCase {
-    func until(_ predicate: () -> Bool) async { for _ in 0..<1000 where !predicate() { await Task.yield() } }
+    func until(_ predicate: () -> Bool) async { for _ in 0..<1000 { if !predicate() { await Task.yield() } } }
     func ready(_ api: StoredMediaFixtureAPI) async -> StoredMediaBrowseModel {
         let model = StoredMediaBrowseModel(list: StoredMediaFixture.list, api: api)
         model.appear(); await until { !model.loading }; return model

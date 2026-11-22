@@ -46,7 +46,7 @@ final class SourceFilterFixtureAPI: SourceFilterAPI {
 
 @MainActor
 final class SourceFilterFlowTests: XCTestCase {
-    func until(_ predicate: () -> Bool) async { for _ in 0..<1000 where !predicate() { await Task.yield() } }
+    func until(_ predicate: () -> Bool) async { for _ in 0..<1000 { if !predicate() { await Task.yield() } } }
     func ready(_ api: SourceFilterFixtureAPI) async throws -> SourceFilterModel {
         let model = SourceFilterModel(title: try SourceFilterFixture.title(), episode: nil, api: api, now: { SourceFilterFixture.now })
         model.appear(); await until { !model.loading }; return model

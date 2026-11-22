@@ -53,7 +53,7 @@ final class ReminderFixtureAPI: ReminderAPI {
 
 @MainActor
 final class RemindersModelTests: XCTestCase {
-    func until(_ predicate: () -> Bool) async { for _ in 0..<1000 where !predicate() { await Task.yield() } }
+    func until(_ predicate: () -> Bool) async { for _ in 0..<1000 { if !predicate() { await Task.yield() } } }
     private func ready(_ api: ReminderFixtureAPI, subject: ReminderSubject? = nil) async -> RemindersModel {
         let model = RemindersModel(context: api.context, subject: subject, api: api)
         model.load(); await until { !model.busy }; return model

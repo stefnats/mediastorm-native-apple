@@ -14,7 +14,7 @@ final class WatchRoomLifecycleTests: XCTestCase {
         let room = try JSONDecoder().decode(WatchRoom.self,from:data(expiry:expiry)); try room.validate(); return room
     }
     private func until(_ predicate: () -> Bool) async {
-        for _ in 0..<1000 where !predicate() { await Task.yield() }
+        for _ in 0..<1000 { if !predicate() { await Task.yield() } }
     }
     func testConsumedRoomOptionsDisableSDKAutostartBeforeLoadWithoutChangingOriginalHeaders() async throws {
         let api = WatchRoomTestAPI(), now = Date(timeIntervalSince1970:1_800_000_000), expiry = now.addingTimeInterval(60)
