@@ -109,6 +109,7 @@ struct SettingsView: View {
             }
 
             Section("Playback") {
+                EpisodeAutoplayControl()
                 NavigationLink("Subtitle Style") { SubtitleSettingsView() }
                 ChoiceRow(title: "Auto-play Trailers", selection: $trailers.autoPlayOverride,
                           defaultValue: trailers.serverAutoPlay ?? false, choices: [

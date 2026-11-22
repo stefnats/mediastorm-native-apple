@@ -9,13 +9,11 @@ extension PlayerViewController {
     func updateSkipAction(at time: Double) {
         skipSegments.refresh(duration: engine.duration, chapters: engine.mediaChapters)
         let found = skipSegments.active(at: time)
+        episodeAdvance?.observe(credits: found?.type == "outro", playing: engine.state == .playing,
+            position: time, duration: engine.duration, failed: postPlayFailed || resumeWatch != nil)
         let segment = found == dismissedSegment ? nil : found
         guard segment != activeSegment else { return }
         activeSegment = segment
-        stopCountdown()
-        if segment?.type == "outro", nextEpisode != nil, creditsAutoSkip {
-            startCountdown()
-        }
         refreshSkipAction()
     }
 
@@ -31,7 +29,7 @@ extension PlayerViewController {
         }
         contextualActions = activeSegment.map { segment in
             [SkipSegments.action(
-                for: segment, next: nextEpisode, countdown: countdown?.remaining,
+                for: segment, next: nextEpisode, countdown: nil,
                 skip: { [weak self] end in
                     guard let self else { return }
                     Task { await self.engine.seek(to: min(end, self.engine.duration)) }
@@ -56,59 +54,29 @@ extension PlayerViewController {
 
     /// Menu on the software route's Skip capsule (the HUD routes it here).
     func dismissSkipActionIfMenu() {
+        if episodeAdvance?.visible == true || activeSegment?.type == "outro" { episodeAdvance?.cancelCountdown() }
         guard let activeSegment, !contextualActions.isEmpty else { return }
         log.notice("skip button dismissed (\(activeSegment.type))")
         dismissedSegment = activeSegment
         self.activeSegment = nil
-        stopCountdown()
         refreshSkipAction()
     }
 
     // MARK: Up next
 
     func prefetchNextIfNear(_ time: Double) {
-        guard !didPrefetchNext, let nextEpisode, engine.duration > 0 else { return }
+        guard !didPrefetchNext, let nextEpisode, episodeAdvance?.current == true, engine.duration > 0 else { return }
         guard time >= engine.duration * Self.prefetchFraction || activeSegment?.type == "outro" else { return }
         didPrefetchNext = true
         log.notice("prefetching \(nextEpisode.episode?.code ?? "?") at \(Int(time))s of \(Int(self.engine.duration))s")
-        PlaybackCoordinator.shared.prefetch(nextEpisode)
+        PlaybackCoordinator.shared.prefetch(nextEpisode, context: progressViewer)
     }
 
-    /// Counts the Next Episode button down while the credits play; pausing holds it and
-    /// seeking out of the credits cancels it.
-    private func startCountdown() {
-        let timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.tickCountdown() }
-        }
-        countdown = (Self.countdownSeconds, timer)
-        log.notice("credits: next episode in \(Self.countdownSeconds)s")
-    }
+    func stopCountdown() { episodeAdvance?.cancelCountdown() }
 
-    private func tickCountdown() {
-        guard let current = countdown, engine.state == .playing else { return }
-        let remaining = current.remaining - 1
-        guard remaining > 0 else {
-            stopCountdown()
-            if let nextEpisode { playNext(nextEpisode) }
-            return
-        }
-        countdown = (remaining, current.timer)
-        refreshSkipAction()
-    }
-
-    func stopCountdown() {
-        countdown?.timer.invalidate()
-        countdown = nil
-    }
-
-    /// Closes this episode (saving it as finished) and starts the next over the loading art.
+    /// All controls share the same one-shot transition claim.
     func playNext(_ next: PlaybackRequest) {
-        guard !isAdvancing, !didFinish else { return }
-        var next = next
-        next.speed = playbackSpeed
-        isAdvancing = true
-        stopCountdown()
-        log.notice("playing next: \(next.episode?.code ?? "?")")
-        dismiss(animated: true) { PlaybackCoordinator.shared.play(next) }
+        guard next.prequeueKey == nextEpisode?.prequeueKey else { return }
+        episodeAdvance?.startNow()
     }
 }

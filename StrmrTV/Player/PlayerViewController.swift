@@ -44,8 +44,8 @@ final class PlayerViewController: EnginePlayerViewController {
     var playbackSpeed: Float = 1
     static let speedChoices: [Float] = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]
 
-    // Up next. The next episode's prequeue starts near the end; with the profile's credits
-    // auto-skip on, the Next Episode button counts down and plays it by itself.
+    // Ordinary VOD up next. Profile autoplay and effective credits skipping
+    // are independent inputs to the one consumed episode transition.
     lazy var nextEpisode = request.nextEpisode
     var creditsAutoSkip = false
     /// Settings › Playback › Credits Detection (`PlayerViewController+Credits`).
@@ -53,9 +53,11 @@ final class PlayerViewController: EnginePlayerViewController {
     var creditsDetection = CreditsDetection()
     var creditsTask: Task<Void, Never>?
     var didPrefetchNext = false
-    var countdown: (remaining: Int, timer: Timer)?
+    var episodeAdvance: EpisodeAdvanceController?
+    var episodePanel: UIViewController?
+    var episodeHandoffTask: Task<Void, Never>?
+    var episodeEndReported = false
     var isAdvancing = false
-    static let countdownSeconds = 7
     /// Share of the runtime after which the next episode starts resolving (as the Expo player).
     static let prefetchFraction = 0.9
 
@@ -160,13 +162,7 @@ final class PlayerViewController: EnginePlayerViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         guard loadTask == nil else { return }
-        if nextEpisode != nil {
-            Task { [weak self] in
-                let credits = await PlaybackCoordinator.shared.creditsSettings()
-                self?.creditsAutoSkip = credits.autoSkip
-                self?.creditsDetectionEnabled = CreditsDetectionSettingsStore.shared.enabled(server: credits.detection)
-            }
-        }
+        startEpisodeAdvance()
         matchContent = view.window?.displayCriteriaMatchingEnabled ?? false
         telemetry.start()
         startAutoSwitchWatch()
@@ -278,6 +274,7 @@ final class PlayerViewController: EnginePlayerViewController {
         guard !isInBackground, !didFinish, !isExitingToDetails else { return }
         switch state {
         case .paused:
+            episodeAdvance?.observe(credits: activeSegment?.type == "outro", playing: false, position: lastKnownPosition, duration: lastKnownDuration, failed: postPlayFailed)
             if pausedAt == nil { pausedAt = Date() }
         case .playing:
             if let swappedAt = itemSwappedWhilePausedAt,
@@ -291,6 +288,7 @@ final class PlayerViewController: EnginePlayerViewController {
                 armResumeWatch()
             }
             pausedAt = nil
+            episodeAdvance?.observe(credits: activeSegment?.type == "outro", playing: true, position: lastKnownPosition, duration: lastKnownDuration, failed: postPlayFailed)
         case .ended:
             // A long pause can leave the source connection dead; its read then surfaces as
             // end-of-file. A real end lands in the last couple of minutes.
@@ -298,15 +296,22 @@ final class PlayerViewController: EnginePlayerViewController {
                 exitToDetails(reason: "end of stream at \(Int(lastKnownPosition))s of \(Int(lastKnownDuration))s")
                 return
             }
+            if nextEpisode != nil {
+                guard episodeAdvance?.naturalEnd(position: lastKnownPosition, duration: lastKnownDuration,
+                    failed: postPlayFailed || resumeWatch != nil) == true else {
+                    exitToDetails(reason: "The episode did not reach a confirmed natural end")
+                    return
+                }
+                if !episodeEndReported { reportProgress(ended: true); episodeEndReported = true }
+                engine.pause()
+                return
+            }
             if offerPostPlay() { return }
             reportProgress(ended: true)
-            if let nextEpisode {
-                playNext(nextEpisode)
-            } else {
-                dismiss(animated: true)
-            }
+            dismiss(animated: true)
         case let .error(message):
             postPlayFailed = true
+            episodeAdvance?.observe(credits: false, playing: false, position: lastKnownPosition, duration: lastKnownDuration, failed: true)
             if resumeWatch != nil {
                 exitToDetails(reason: "error after resume: \(message)")
             } else {
@@ -321,6 +326,9 @@ final class PlayerViewController: EnginePlayerViewController {
         guard !didFinish else { return }
         didFinish = true
         postPlayTask?.cancel()
+        episodeHandoffTask?.cancel()
+        episodeAdvance?.close()
+        refreshEpisodeAdvancePanel()
         log.notice("player closed at \(self.lastKnownPosition)s of \(self.lastKnownDuration)s")
         loadTask?.cancel()
         audioPickTask?.cancel()
