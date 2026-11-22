@@ -8,10 +8,14 @@ struct MobileListPage: View {
     let list: BrowseList
 
     var body: some View {
-        switch list {
-        case .continueWatching: MobileContinueWatchingGrid()
-        case .hidden: MobileHiddenGrid()
-        default: MobileBrowseGrid(list: list)
+        if list.isDirectSavedCatalogue {
+            StoredMediaCatalogueView(list: list)
+        } else {
+            switch list {
+            case .continueWatching: MobileContinueWatchingGrid()
+            case .hidden: MobileHiddenGrid()
+            default: MobileBrowseGrid(list: list)
+            }
         }
     }
 }

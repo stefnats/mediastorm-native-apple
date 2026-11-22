@@ -9,6 +9,7 @@ struct HiddenTitlesView: View {
 
     var body: some View {
         GridPage(title: String(localized: "Hidden"), gridWidth: $gridWidth) {
+            StoredMediaFilterEntry(list: .hidden)
             if titles.hidden.isEmpty {
                 GridMessage(text: titles.hiddenLoaded
                     ? String(localized: "Nothing is hidden from this profile.")

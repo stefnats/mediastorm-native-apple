@@ -96,7 +96,7 @@ struct BrowseGridView: View {
         .navigationDestination(item: $pickedShow) { LibraryShowView(target: $0) }
     }
 
-    private var hasControls: Bool { !list.sorts.isEmpty || list.filters || list.offersRandom || list.parts.count > 1 }
+    private var hasControls: Bool { list.storedEligible || !list.sorts.isEmpty || list.filters || list.offersRandom || list.parts.count > 1 }
 
     private struct ReloadKey: Equatable {
         let options: BrowseOptions

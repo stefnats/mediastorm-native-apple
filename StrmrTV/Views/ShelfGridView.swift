@@ -7,7 +7,9 @@ struct ListPage: View {
     let list: BrowseList
 
     var body: some View {
-        if list == .continueWatching {
+        if list.isDirectSavedCatalogue {
+            StoredMediaCatalogueView(list: list)
+        } else if list == .continueWatching {
             ContinueWatchingGridView()
         } else if list == .hidden {
             HiddenTitlesView()
@@ -29,6 +31,7 @@ struct ContinueWatchingGridView: View {
 
     var body: some View {
         GridPage(title: String(localized: "Continue Watching"), gridWidth: $gridWidth) {
+            StoredMediaFilterEntry(list: .continueWatching)
             if let cards, cards.isEmpty {
                 GridMessage(text: String(localized: "Nothing to continue."), holdsFocus: true)
             } else if let cards {
