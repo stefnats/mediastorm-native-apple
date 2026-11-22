@@ -171,6 +171,7 @@ enum WatchRoomPlayback {
         let engine = try AetherEngine()
         engine.deactivatesAudioSessionOnStop = false
         try session.assignPlayer()
+        PlaybackCoordinator.shared.retirePostPlay()
         let player = WatchRoomPlayerViewController(engine:engine,session:session)
         active = player
         presenter.present(player,animated:true)
