@@ -58,9 +58,17 @@ struct LibraryProbe: Decodable, Hashable, Sendable {
     let audioCodecs: [String]?
 }
 
+/// Explicit file membership; this supplies no intra-file start offsets.
+struct LibraryEpisodeMembership: Decodable, Hashable, Sendable {
+    let seasonNumber: Int
+    let episodeNumber: Int
+}
+
 /// One file: a movie version or an episode's copy.
 struct LibraryItem: Decodable, Hashable, Identifiable, Sendable {
     let id: String
+    let episodes: [LibraryEpisodeMembership]?
+    var isCombinedFile: Bool { !(episodes ?? []).isEmpty }
     let fileName: String?
     let seasonNumber: Int?
     let episodeNumber: Int?
@@ -139,10 +147,17 @@ struct LibraryMatch: Decodable, Sendable {
 }
 
 /// `GET /api/library/items/{id}/playback`: the file's stream path, played like any other.
-struct LibraryPlaybackInfo: Decodable, Sendable {
+struct LibraryPlaybackInfo: Decodable, Equatable, Sendable {
     let itemId: String
     let streamPath: String
     let durationSeconds: Double?
+    let combinedEpisodes: [LibraryEpisodeMembership]?
+    let progressScope: String?
+    let playbackNotice: String?
+    let displayName: String?
+    let fileName: String?
+
+    var isCombinedFile: Bool { progressScope == "file" || !(combinedEpisodes ?? []).isEmpty }
 }
 
 /// A library title in a grid or Home row, with the library it came from.

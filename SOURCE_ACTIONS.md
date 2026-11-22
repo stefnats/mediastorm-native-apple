@@ -54,3 +54,21 @@ selected compiler rather than assuming that an older Xcode supports this source.
 AetherEngine remains the existing exact 7.47.0 dependency, and Google Cast remains
 exact 4.8.6. Future CI resolves those existing dependencies and includes the
 tracked Iroh framework; the local sparse source checkout excludes its large blobs.
+
+## Combined episode files
+
+The separate combined-file change decodes the backend's explicit membership and
+file-progress marker. It keeps such files in the manual Versions list and excludes
+them from automatic best-episode selection. Selecting one asks Play From Beginning
+or Cancel before a player or media request is created. After consent, actual
+library playback data is re-read under the same client context; changed data or
+missing file-progress semantics are denied instead of becoming a single episode.
+
+Playback uses the existing unmatched-library target with movie/file progress keyed
+by the actual opaque streamPath. Catalogue IDs, the selected episode, resume point,
+following episodes and episode artwork are removed. The full file duration and
+position are retained as file progress; no episode offset, duration ratio or
+automatic watched update for all members is manufactured. The same coordinator
+handles TV and iPhone/iPad. New XCTest cases cover mapping, progress metadata,
+malformed descriptors, legacy single-episode compatibility and pre-cancelled
+consent; an actual remote-control/device interaction remains to be validated.

@@ -91,7 +91,8 @@ struct LibraryVersions: Hashable, Sendable {
     }
 
     func best(season: Int?, episode: Int?) -> LibraryVersion? {
-        versions(season: season, episode: episode).first
+        // No membership list proves where an episode starts in the file.
+        versions(season: season, episode: episode).first { !$0.item.isCombinedFile }
     }
 
     private mutating func add(_ group: LibraryGroup, libraryName: String) {

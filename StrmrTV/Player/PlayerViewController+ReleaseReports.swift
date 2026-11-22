@@ -3,7 +3,7 @@ import UIKit
 
 extension PlayerViewController {
     func releaseReportAction() -> UIAction {
-        let available = currentSource.prequeueID != nil && currentSource.prequeueContext != nil && !engine.isLive && !playsDownload
+        let available = currentSource.prequeueID != nil && currentSource.viewerContext != nil && !engine.isLive && !playsDownload
         return UIAction(title: String(localized: "Report / Change Source…"),
                         image: UIImage(systemName: "exclamationmark.bubble"),
                         attributes: available ? [] : [.disabled]) { [weak self] _ in
@@ -13,7 +13,7 @@ extension PlayerViewController {
 
     private func presentReleaseReport() {
         guard !didFinish, presentedViewController == nil, let id = currentSource.prequeueID,
-              let context = currentSource.prequeueContext else { return }
+              let context = currentSource.viewerContext else { return }
         guard APIClient.shared.isCurrent(context) else {
             subtitleStatus.show(String(localized: "Profile or connection changed. Reopen playback before reporting."), hideAfter: 5)
             return

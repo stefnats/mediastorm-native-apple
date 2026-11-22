@@ -203,11 +203,19 @@ final class PlaybackCoordinator: ObservableObject {
                 let showPreviews = await previews
                 try Task.checkCancellation()
                 guard resolveID == id else { return }
-                if let original = source.prequeueContext, !original.sameViewer(as: api.sourceContext()) {
+                if let original = source.viewerContext, !original.sameViewer(as: api.sourceContext()) {
                     throw APIError.notReady("Profile or connection changed before playback")
                 }
                 if let context = source.reportContext { try api.requireSourceContext(context) }
-                transferred = presentPlayer(engine: engine, request: request, path: path, tracks: tracks, source: source,
+                var presentationRequest = request
+                if let playback = source.combinedFile {
+                    guard let version = request.libraryVersion, let context = source.viewerContext else {
+                        throw APIError.notReady("Combined file presentation is unavailable")
+                    }
+                    try api.requireSourceContext(context)
+                    presentationRequest = try CombinedLibraryFilePlayback.request(request, version: version, playback: playback)
+                }
+                transferred = presentPlayer(engine: engine, request: presentationRequest, path: path, tracks: tracks, source: source,
                                              carry: carry, previewsEnabled: showPreviews) { self.finishResolve(id) }
             } catch is CancellationError {
                 finishResolve(id)
@@ -479,6 +487,11 @@ final class PlaybackCoordinator: ObservableObject {
         player.trackCarry = carry
         presenter.present(player, animated: true, completion: completion)
         return true
+    }
+
+    func confirmCombinedLibraryFile(_ playback: LibraryPlaybackInfo) async -> Bool {
+        guard let presenter = Self.topViewController(), presenter.presentedViewController == nil else { return false }
+        return await CombinedLibraryFileConsent().confirm(playback, on: presenter)
     }
 
     private static func topViewController() -> UIViewController? {
