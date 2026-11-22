@@ -121,6 +121,7 @@ struct MobileRecordingDetailSheet: View {
                         }
                     } header: { Text("Captured parts") }
                 }
+                RecordingDerivedTools(recording: recording, dismissPresented: true).id(recording)
                 Section {
                     if recording.canPlay {
                         Button { perform(.play) } label: {

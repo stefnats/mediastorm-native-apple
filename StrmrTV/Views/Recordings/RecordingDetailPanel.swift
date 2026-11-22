@@ -28,6 +28,7 @@ struct RecordingDetailPanel: View {
                 Text(error).font(.callout).foregroundStyle(.red).lineLimit(3)
             }
             captureDetails
+            RecordingDerivedTools(recording: recording).id(recording)
             actions.padding(.top, 20)
         }
     }
