@@ -1,3 +1,4 @@
+import AetherEngine
 import UIKit
 
 // MARK: Idle-connection recovery
@@ -5,7 +6,8 @@ import UIKit
 // A long pause lets the source's HTTP connection go idle and die; the resume read then
 // never completes. Reconnecting in place proved unreliable, so the player saves progress
 // and returns to the details page, where Resume is offered:
-// - Device sleep / app switch backgrounds the app: leave on return to the foreground.
+// - Device sleep / app switch: retain a healthy engine on return; a lost session
+//   still leaves for details. Playing sessions must demonstrate real progress.
 // - The screensaver over a paused player sends no lifecycle event: after a resume from a
 //   long pause, leave only if the resume makes no progress or the engine errors / hits a
 //   false end-of-file. A healthy resume progresses within a second and disarms the watch,
@@ -45,14 +47,18 @@ extension PlayerViewController {
     private func appWillEnterForeground() {
         isInBackground = false
         guard wasBackgrounded, !didFinish else { return }
-        #if os(iOS)
-        // The engine may have kept a paused session through a quick app switch.
-        if mobileReturnedToForeground() {
-            wasBackgrounded = false
+        wasBackgrounded = false
+        if Self.retainsForegroundPlayback(engine.state, needsVideoRestore: engine.needsForegroundVideoRestore) {
+            // PIN return policy never stops retained playback. A genuinely dead
+            // connection still reaches the existing no-progress/error recovery.
+            if engine.state == .playing { armResumeWatch() }
             return
         }
-        #endif
         exitToDetails(reason: "returned from background")
+    }
+
+    static func retainsForegroundPlayback(_ state: PlaybackState, needsVideoRestore: Bool) -> Bool {
+        !needsVideoRestore && (state == .playing || state == .paused)
     }
 
     /// A pause made from AVKit's transport bar goes straight to the AVPlayer, so the engine's

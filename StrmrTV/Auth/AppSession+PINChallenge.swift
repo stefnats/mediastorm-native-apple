@@ -10,7 +10,7 @@ extension AppSession {
             return challengeTask.profileID == id ? await challengeTask.task.value : false
         }
         // No prompt over the player (or before a profile is in use): the call fails.
-        guard phase == .ready, !PlaybackCoordinator.shared.isPresentingPlayer,
+        guard phase == .ready, !hasProtectedPlaybackPresentation,
               let locked = profiles.first(where: { $0.id == id }) ?? (profile?.id == id ? profile : nil)
         else { return false }
         let task = Task<Bool, Never> { @MainActor in
@@ -30,10 +30,14 @@ extension AppSession {
     /// the waiting requests retry.
     func verifyChallenge(pin: String) async -> PINVerification {
         guard let challenge = pinChallenge else { return .wrong }
+        let owner = resumeOwner
         do {
             guard try await api.verifyPIN(pin, profileID: challenge.profile.id) else { return .wrong }
         } catch {
             return .failed(error.localizedDescription)
+        }
+        guard pinChallenge?.id == challenge.id, owner == resumeOwner else {
+            return .failed(String(localized: "Profile or connection changed. Reopen the PIN prompt."))
         }
         pinChallenge = nil
         finishChallenge(true)

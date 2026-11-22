@@ -109,6 +109,7 @@ class EnginePlayerViewController: AVPlayerViewController {
         Self.restorePortrait()
         #endif
         finish()
+        AppSession.shared.playbackReturnedToBrowsing()
     }
 
     /// The Stream tab's rows changed (`+StreamInfo`); the software route's HUD shows the summary.

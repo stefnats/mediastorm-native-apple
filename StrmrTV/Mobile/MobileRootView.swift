@@ -29,6 +29,9 @@ struct MobileRootView: View {
             case .ready:
                 // Rebuilt per profile so every screen reloads its data.
                 MobileMainView().id(session.profile?.id)
+                    .opacity(session.protectedBrowsingBlocked ? 0 : 1)
+                    .allowsHitTesting(!session.protectedBrowsingBlocked)
+                    .accessibilityHidden(session.protectedBrowsingBlocked)
             case let .unavailable(message):
                 MobileOfflineView(message: message)
             }
@@ -71,6 +74,8 @@ struct MobileRootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: playback.resolving == nil)
+        .onAppear { session.playbackReturnedToBrowsing() }
+        .onChange(of: playback.resolving == nil) { _, _ in session.playbackReturnedToBrowsing() }
         .modifier(MobileProfileLockPrompt(session: session))
         .alert(
             "Playback Error",

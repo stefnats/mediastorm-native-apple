@@ -29,11 +29,11 @@ extension MenuTab {
 extension MenuTabsStore {
     /// The TV menu's tabs between Home and Settings that show on this device, by id, in the
     /// default order: Movies, Shows and pages with tabs of their own, then the sections.
-    /// Kids profiles don't get Live (as in the Expo app).
+    /// Child Live is available only after the current server policy was read.
     func shownTabIDs(homeViews: HomeViewsStore) -> [String] {
         let kids = AppSession.shared.profile?.isKidsProfile == true
         let views = homeViews.ids.filter { $0 != HomeViews.all && isVisible(homeView: $0) }
-        let sections = MenuTab.allCases.filter { isVisible($0) && !(kids && $0 == .live) }
+        let sections = MenuTab.allCases.filter { kids && $0 == .live ? showsKidsLive : isVisible($0) }
         return views + sections.map(\.rawValue)
     }
 
