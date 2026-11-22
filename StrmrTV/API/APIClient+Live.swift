@@ -5,14 +5,19 @@ extension APIClient {
     /// (`favoriteIds`) first and through every filter; hidden channels are dropped here.
     func liveChannels(sourceID: String?, categories: [String], favoritesOnly: Bool, search: String,
                       favoriteIDs: [String], offset: Int, limit: Int) async throws -> LiveChannelsPage {
-        var body: [String: Any] = [
-            "profileId": profileID, "offset": offset, "limit": limit,
-            "favoriteIds": favoriteIDs, "favoritesOnly": favoritesOnly,
-        ]
+        let body = Self.liveChannelsBody(profileID: profileID, sourceID: sourceID, categories: categories,
+            favoritesOnly: favoritesOnly, search: search, favoriteIDs: favoriteIDs, offset: offset, limit: limit)
+        return try await send("POST", "/api/live/channels", jsonObject: body, timeout: 60)
+    }
+
+    static func liveChannelsBody(profileID: String, sourceID: String?, categories: [String], favoritesOnly: Bool,
+                                 search: String, favoriteIDs: [String], offset: Int, limit: Int) -> [String: Any] {
+        var body: [String: Any] = ["groupByStation": true, "profileId": profileID, "offset": offset, "limit": limit,
+                                   "favoriteIds": favoriteIDs, "favoritesOnly": favoritesOnly]
         if let sourceID { body["sourceId"] = sourceID }
         if !categories.isEmpty { body["categories"] = categories }
         if !search.isEmpty { body["filter"] = search }
-        return try await send("POST", "/api/live/channels", jsonObject: body, timeout: 60)
+        return body
     }
 
     func epgStatus() async throws -> EPGStatus {
@@ -60,17 +65,83 @@ extension APIClient {
     /// or an HLS session (`sessionID`, kept alive with `keepLiveSessionAlive`).
     /// `token=` / `profileUnlock=` ride in the query as on every header-less media URL.
     /// `forceHLS`: an HLS session even when the source is set to direct (`format=hls`).
-    func startLive(_ channel: LiveChannel, programTitle: String?,
-                   forceHLS: Bool = false) async throws -> LiveTune {
-        var query = liveStartQuery(channel, programTitle: programTitle)
-        if forceHLS { query["format"] = "hls" }
-        let start: LiveStart = try await send("GET", "/api/live/hls/start", query: query, timeout: 60)
-        let isDirect = start.isDirect == true
-        guard let path = isDirect ? start.streamUrl : start.playlistUrl, !path.isEmpty else {
-            throw APIError.notReady("The server did not return a stream for this channel")
+    func startLive(_ channel: LiveChannel, programTitle: String?, forceHLS: Bool = false,
+                   attempt: LivePlaybackAttempt, automatic: Bool = false) async throws -> LiveTune {
+        let start = try await openLiveStart(channel, programTitle: programTitle, forceHLS: forceHLS, target: "native", attempt: attempt, automatic: automatic)
+        do {
+            let isDirect = start.isDirect == true
+            guard let path = isDirect ? start.streamUrl : start.playlistUrl, !path.isEmpty,
+                  isDirect ? start.sessionId == nil : (start.sessionId.map(KidsLiveOpened.validSession) == true &&
+                    URLComponents(string: path)?.path == "/video/hls/\(start.sessionId!)/stream.m3u8") else {
+                throw APIError.notReady("The server did not return a stream for this channel")
+            }
+            return LiveTune(url: try mediaURL(apiPath: path, context: attempt.context), sessionID: isDirect ? nil : start.sessionId,
+                stremioStreamIndex: start.stremioStreamIndex, stremioStreamIndexes: start.stremioStreamIndexes)
+        } catch {
+            let cleanup = Task { try await self.retireLiveStart(start, context: attempt.context) }
+            do { try await cleanup.value } catch { attempt.stopUnconfirmed() }
+            throw error
         }
-        return LiveTune(url: try mediaURL(apiPath: path), sessionID: isDirect ? nil : start.sessionId,
-                        stremioStreamIndex: start.stremioStreamIndex, stremioStreamIndexes: start.stremioStreamIndexes)
+    }
+
+    func openLiveStart(_ channel: LiveChannel, programTitle: String?, forceHLS: Bool,
+                       target: String, attempt: LivePlaybackAttempt, automatic: Bool = false) async throws -> LiveStart {
+        var original = liveStartQuery(channel, programTitle: programTitle)
+        original["target"] = target
+        original["profileId"] = attempt.context.profileID
+        original["clientId"] = attempt.context.clientID
+        if forceHLS { original["format"] = "hls" }
+        let query = original
+        return try await attempt.open(channel, automaticIntent: automatic,
+            confirm: { challenge, deadline in await attempt.confirmRecording(challenge, deadline: deadline) },
+            fetch: { id, confirmation, automatic in
+                try self.requireSourceContext(attempt.context)
+                var values = query
+                values["playAttemptId"] = id
+                values["automaticRetry"] = String(automatic)
+                var request = try Self.liveStartRequest(context: attempt.context, query: values, confirmation: confirmation)
+                request.timeoutInterval = 30
+                let data = try await self.sendOriginalSourceAction(request)
+                do { return try self.decoder.decode(LiveStart.self, from: data) }
+                catch {
+                    struct Receipt: Decodable { let sessionId: String }
+                    if let receipt = try? self.decoder.decode(Receipt.self, from: data), KidsLiveOpened.validSession(receipt.sessionId) {
+                        let cleanup = Task { try await self.stopLiveSessionStrict(receipt.sessionId, context: attempt.context) }
+                        do { try await cleanup.value } catch { attempt.stopUnconfirmed() }
+                    }
+                    throw error
+                }
+            }, retire: { reply in try await self.retireLiveStart(reply, context: attempt.context) })
+    }
+
+    static func liveStartRequest(context: SourceActionContext, query: [String: String], confirmation: String?) throws -> URLRequest {
+        var request = try context.request("GET", path: "/api/live/hls/start")
+        guard let url = request.url, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            throw APIError.notReady("The channel address is unavailable")
+        }
+        var values = query
+        values["profileId"] = context.profileID
+        values["clientId"] = context.clientID
+        components.queryItems = values.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
+        request.url = components.url
+        if let confirmation { request.setValue(confirmation, forHTTPHeaderField: "X-Live-Recording-Confirmation") }
+        return request
+    }
+
+    func retireLiveStart(_ reply: LiveStart, context: SourceActionContext) async throws {
+        if let id = reply.sessionId, KidsLiveOpened.validSession(id) { try await stopLiveSessionStrict(id, context: context) }
+    }
+
+    func keepLiveSessionAliveStrict(_ sessionID: String, context: SourceActionContext, paused: Bool? = nil) async throws {
+        try requireSourceContext(context)
+        var request = try context.request("POST", path: "/api/video/hls/\(Self.segment(sessionID))/keepalive")
+        request.timeoutInterval = 10
+        if let paused, let url = request.url, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            components.queryItems = (components.queryItems ?? []) + [URLQueryItem(name: "paused", value: String(paused))]
+            request.url = components.url
+        }
+        _ = try await sendOriginalSourceAction(request)
+        try requireSourceContext(context)
     }
 
     /// The `/api/live/hls/start` query for `channel`.
@@ -121,7 +192,26 @@ extension APIClient {
 
     /// A server-relative media path (`/live/stream?…`, `/video/hls/…`) under `/api`, with the
     /// session token and profile unlock added to its query.
-    func mediaURL(apiPath: String) throws -> URL {
+    func mediaURL(apiPath: String, context: SourceActionContext? = nil) throws -> URL {
+        if let context {
+            guard let supplied = URLComponents(string: apiPath), supplied.scheme == nil, supplied.host == nil,
+                  supplied.path.hasPrefix("/video/") || supplied.path.hasPrefix("/live/") else {
+                throw APIError.notReady("The server returned an unsupported live address")
+            }
+            let original = try context.request("GET", path: "/api" + supplied.path)
+            guard let raw = original.url, var components = URLComponents(url: raw, resolvingAgainstBaseURL: false) else {
+                throw APIError.notReady("The live address is unavailable")
+            }
+            var query = (supplied.queryItems ?? []).filter { !["token", "profileId", "profileUnlock", "clientId"].contains($0.name) }
+            query += [URLQueryItem(name: "profileId", value: context.profileID), URLQueryItem(name: "clientId", value: context.clientID)]
+            if let auth = original.value(forHTTPHeaderField: "Authorization"), auth.hasPrefix("Bearer ") {
+                query.append(URLQueryItem(name: "token", value: String(auth.dropFirst(7))))
+            }
+            if let unlock = original.value(forHTTPHeaderField: "X-Profile-Unlock") { query.append(URLQueryItem(name: "profileUnlock", value: unlock)) }
+            components.queryItems = query
+            guard let url = components.url else { throw APIError.notReady("The live address is unavailable") }
+            return url
+        }
         let parts = apiPath.split(separator: "?", maxSplits: 1).map(String.init)
         var extra: [String] = []
         if let token { extra.append("token=\(Self.segment(token))") }

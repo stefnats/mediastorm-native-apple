@@ -38,6 +38,7 @@ extension LivePlayerViewController {
     /// Fails the channel, unless it is a Stremio channel with a stream left to try.
     func failOrFailOver(_ message: String) {
         guard !didFinish else { return }
+        guard liveAttempt.canAutomaticallyRetry else { fail(message); return }
         guard channel.hasStremioSources, failoverTask == nil else {
             if failoverTask == nil { fail(message) }
             return

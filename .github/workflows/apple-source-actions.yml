@@ -71,6 +71,15 @@ jobs:
                       candidates.append((tuple(map(int,match.groups())),device['udid']))
           assert candidates, 'No actual available Apple TV simulator for tvOS 18+ found'
           pathlib.Path('artifacts/tvos-destination.txt').write_text('id='+sorted(candidates,reverse=True)[0][1])
+          phones=[]
+          for runtime,devices in data['devices'].items():
+              match=re.search(r'iOS-(\d+)-(\d+)',runtime)
+              if not match or int(match.group(1)) < 18: continue
+              for device in devices:
+                  if device.get('isAvailable') and device.get('name','').startswith('iPhone'):
+                      phones.append((tuple(map(int,match.groups())),device['udid']))
+          assert phones, 'No actual available iPhone simulator for iOS 18+ found'
+          pathlib.Path('artifacts/ios-unit-destination.txt').write_text('id='+sorted(phones,reverse=True)[0][1])
           PY
       - name: Run hosted tvOS XCTest unit suite
         run: |
@@ -90,6 +99,16 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath .build/derived-data \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee artifacts/ios-build.log
+      - name: Run hosted iPhone live admission unit tests
+        run: |
+          set -euo pipefail
+          export TMPDIR="$GITHUB_WORKSPACE/.build/temporary"
+          xcodebuild test -project StrmrTV.xcodeproj -scheme StrmrMobile \
+            -destination "$(cat artifacts/ios-unit-destination.txt)" \
+            -derivedDataPath .build/derived-data \
+            -resultBundlePath artifacts/LiveAdmission-iOS.xcresult \
+            -only-testing:StrmrMobileTests -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee artifacts/ios-unit-xctest.log
       - name: Preserve actual logs and XCTest results
         if: always()
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0, Node 24

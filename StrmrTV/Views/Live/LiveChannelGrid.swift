@@ -13,15 +13,29 @@ struct LiveChannelGrid: View {
 
     var body: some View {
         ScrollView {
-            CardGrid(items: store.visibleChannels, cardWidth: LiveChannelCard.width, available: gridWidth, resizable: false,
-                     onNearEnd: { Task { await store.loadMore() } }) { channel, width in
-                LiveChannelCard(channel: channel, width: width, now: now, focus: $focus)
+            LazyVStack(alignment: .leading, spacing: 24) {
+                ForEach(store.stationSections) { section in
+                    if section.stationID != nil {
+                        Button { store.toggleStation(section) } label: {
+                            Label("\(section.name) · \(section.scope)", systemImage: store.isCollapsed(section) ? "chevron.right" : "chevron.down")
+                        }
+                        .focused($focus, equals: section.id)
+                    }
+                    if !store.isCollapsed(section) {
+                        CardGrid(items: section.members, cardWidth: LiveChannelCard.width, available: gridWidth, resizable: false,
+                                 onNearEnd: {}) { member, width in
+                            LiveChannelCard(channel: member.channel, width: width, now: now, focus: $focus)
+                        }
+                    }
+                    Color.clear.frame(height: 1).onAppear { store.stationAppeared(section) }
+                }
             }
             .padding(.horizontal, CardGridLayout.inset)
             .onGeometryChange(for: CGFloat.self) { $0.size.width - CardGridLayout.inset * 2 } action: { gridWidth = $0 }
+
         }
         .liveContentFocus($focus, request: $request, memory: $store.focusMemory,
-                          match: { id in store.visibleChannels.contains { $0.id == id } ? id : nil },
+                          match: { id in store.stationSections.contains { $0.stationID != nil && $0.id == id } || store.displayedChannels.contains { $0.presentationKey == id } ? id : nil },
                           onExit: onExit)
     }
 }
@@ -71,12 +85,12 @@ struct LiveChannelCard: View {
                 }
             }
             .cardLift()
-            .focused(focus, equals: channel.id)
+            .focused(focus, equals: channel.presentationKey)
             .contextMenu { LiveChannelMenu(channel: channel) }
             .accessibilityLabel([channel.name, current?.title].compactMap { $0 }.joined(separator: ", "))
             .onAppear { store.needNowNext(channel) }
 
-            CardCaption(title: channel.name, subtitle: current?.title ?? channel.group ?? "", width: width)
+            CardCaption(title: channel.name, subtitle: [channel.sourceName, current?.title ?? channel.group].compactMap { $0 }.joined(separator: " · "), width: width)
         }
     }
 }

@@ -31,6 +31,13 @@ protocol MultiscreenTransport {
     func stop(_ sessionID: String) async throws
 }
 
+/// Actual transport receives the queued intent and its original slot lifetime.
+/// Existing deterministic test transports keep the original protocol surface.
+@MainActor
+protocol OriginalMultiscreenTransport: MultiscreenTransport {
+    func start(_ channel: LiveChannel, automatic: Bool, current: @escaping () -> Bool) async throws -> (sessionID: String?, url: URL?)
+}
+
 enum MultiscreenError: Error {
     case noStream
     case releaseFailed
@@ -95,7 +102,7 @@ final class MultiscreenSession: ObservableObject {
     /// A channel already on another screen just focuses that screen. The slot shows it is
     /// tuning at once; the returned task finishes when the tune has.
     @discardableResult
-    func tune(_ index: Int, to channel: LiveChannel) -> Task<Void, Never> {
+    func tune(_ index: Int, to channel: LiveChannel, automatic: Bool = false) -> Task<Void, Never> {
         guard !closed, index >= 0, index <= slots.count else { return Task {} }
         if let duplicate = self.index(of: channel), duplicate != index {
             focus(duplicate)
@@ -117,7 +124,11 @@ final class MultiscreenSession: ObservableObject {
                 try await release(index)
                 guard isCurrent(index, version) else { return }
                 slots[index] = MultiscreenSlot(channel: channel, loading: true)
-                let started = try await transport.start(channel)
+                let started: (sessionID: String?, url: URL?)
+                if let original = transport as? any OriginalMultiscreenTransport {
+                    started = try await original.start(channel, automatic: automatic,
+                        current: { [weak self] in self?.isCurrent(index, version) == true })
+                } else { started = try await transport.start(channel) }
                 // Owned before it is checked, so a failed stop can be retried on exit.
                 slots[index] = MultiscreenSlot(channel: channel, sessionID: started.sessionID, loading: true)
                 guard let url = started.url else {
