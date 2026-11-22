@@ -39,7 +39,8 @@ final class EpisodeAdvanceController: ObservableObject {
         guard current, observers.isEmpty, next != nil else { return }
         let center = NotificationCenter.default
         observers.append(center.addObserver(forName: .episodeAutoplayChanged, object: nil, queue: .main) { [weak self] note in
-            MainActor.assumeIsolated { if let value = note.object as? EpisodeAutoplayChange { self?.adopt(value) } }
+            guard let value = note.object as? EpisodeAutoplayChange else { return }
+            MainActor.assumeIsolated { self?.adopt(value) }
         })
         observers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.suspend(true) }

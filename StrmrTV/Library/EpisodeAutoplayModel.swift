@@ -21,7 +21,8 @@ final class EpisodeAutoplayModel: ObservableObject {
     private func watch() {
         guard observer == nil else { return }
         observer = NotificationCenter.default.addObserver(forName: .episodeAutoplayChanged, object: nil, queue: .main) { [weak self] note in
-            MainActor.assumeIsolated { if let change = note.object as? EpisodeAutoplayChange { self?.adopt(change) } }
+            guard let change = note.object as? EpisodeAutoplayChange else { return }
+            MainActor.assumeIsolated { self?.adopt(change) }
         }
     }
     func appear() {
