@@ -118,6 +118,7 @@ extension PlayerViewController {
 
     func startProgressTimer() {
         progressTimer?.invalidate()
+        guard progressWriter.accepting else { return }
         progressTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.reportProgress(ended: false) }
         }
@@ -126,21 +127,35 @@ extension PlayerViewController {
     func reportProgress(ended: Bool, paused: Bool? = nil) {
         let position = lastKnownPosition
         let duration = lastKnownDuration
-        guard duration > 0, position > 0 else { return }
+        guard progressWriter.accepting, duration > 0, position > 0 else { return }
         #if DEBUG
         guard request.reportsProgress else { return }
         #endif
         let body = request.progressReport(position: position, duration: duration,
                                           paused: paused ?? (engine.state == .paused), ended: ended,
                                           sourcePath: streamPath, stream: streamHealth())
-        // Keep the request alive if the app is on its way into the background (sleep).
-        let background = UIApplication.shared.beginBackgroundTask(withName: "progress")
-        Task {
-            let reply = await APIClient.shared.reportProgress(body)
-            UIApplication.shared.endBackgroundTask(background)
-            if !ended, reply?.migrationRequested == true {
-                autoSwitch(because: "server: \(reply?.migrationReason ?? "migration requested")")
-            }
-        }
+        progressWriter.submit(body, ended: ended)
+    }
+}
+
+extension PlayerViewController: PlayerProgressObserver, ReleaseReportProgressOwner {
+    func progressDidReply(_ reply: ProgressReply, ended: Bool) {
+        guard !didFinish, !ended, progressWriter.accepting, reply.migrationRequested == true else { return }
+        autoSwitch(because: "server: \(reply.migrationReason ?? "migration requested")")
+    }
+
+    func prepareWrongContentReport(resetHistory: Bool) async throws {
+        guard !didFinish else { throw CancellationError() }
+        reportedWrongContent = true
+        engine.pause()
+        progressTimer?.invalidate()
+        progressTimer = nil
+        stopAutoSwitchWatch()
+        // Do not cancel away writes or their UIKit cleanup. A reset is refused
+        // if any previous request lacks an acknowledgement. Report-only still
+        // leaves existing history alone while this source stays permanently muted.
+        try await progressWriter.stopAndDrain(requireKnownAcknowledgements: resetHistory)
+        try Task.checkCancellation()
+        guard !didFinish else { throw CancellationError() }
     }
 }

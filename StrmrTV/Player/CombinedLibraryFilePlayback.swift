@@ -26,6 +26,7 @@ enum CombinedLibraryFilePlayback {
         var request = PlaybackRequest(title: target, episode: nil, start: nil,
                                       following: [], artwork: .init())
         request.libraryVersion = version
+        request.fileOnlyPlayback = true
         request.speed = original.speed
         #if DEBUG
         request.reportsProgress = original.reportsProgress

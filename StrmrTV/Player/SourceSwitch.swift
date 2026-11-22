@@ -11,6 +11,7 @@ enum SourceSwitch {
         var combinedFile: LibraryPlaybackInfo?
         /// A report replacement keeps its exact original cleanup credentials.
         /// Ordinary source switches never acquire this ownership implicitly.
+        var replacementLease: ReleaseReplacementOwnership.Lease?
         var reportContext: SourceActionContext?
         var guid: String?
         var releaseName: String?

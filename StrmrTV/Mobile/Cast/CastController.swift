@@ -37,7 +37,7 @@ final class CastController: ObservableObject {
     private(set) var dlna: [String: DLNARenderer] = [:]
     var transport: CastTransport?
     /// The title watch progress is reported against; nil for a live channel.
-    var playback: (request: PlaybackRequest, path: String)?
+    var playback: OriginalPlaybackProgress?
     /// The server HLS session the receiver reads: kept alive, stopped with the cast.
     var hlsSessionID: String?
     var pollTask: Task<Void, Never>?
@@ -100,7 +100,8 @@ final class CastController: ObservableObject {
     /// `position`. `audio` / `subtitle` are container stream indices (nil: the server's pick /
     /// none). Shows the remote at once; a failure is shown there.
     func start(on device: CastDevice, request: PlaybackRequest, path: String, position: Double,
-               audio: Int?, subtitle: Int?, subtitleLanguage: String?) async {
+               audio: Int?, subtitle: Int?, subtitleLanguage: String?, originalContext: SourceActionContext? = nil) async {
+        let context = originalContext ?? APIClient.shared.sourceContext()
         let poster = (request.title.posterURL ?? request.episode?.imageURL).flatMap(Self.absoluteURL)
         let session = Session(device: device, title: request.title.name,
                               subtitle: request.episode.map { [$0.code, $0.name].compactMap { $0 }.joined(separator: " · ") },
@@ -114,13 +115,13 @@ final class CastController: ObservableObject {
                                                       audio: audio, subtitle: subtitle,
                                                       subtitleLanguage: subtitleLanguage, poster: poster)
                 return Prepared(transport: connected, media: built.media, hlsSessionID: built.hlsSessionID,
-                                playback: (request, path))
+                                playback: OriginalPlaybackProgress(request: request, path: path, context: context))
             case .dlna:
                 let dlnaTransport = try dlnaTransport(for: device)
                 let built = try await dlnaMedia(for: dlnaTransport, request: request, path: path,
                                                 position: position, audio: audio, subtitle: subtitle, poster: poster)
                 return Prepared(transport: dlnaTransport, media: built.media, hlsSessionID: built.hlsSessionID,
-                                playback: (request, path))
+                                playback: OriginalPlaybackProgress(request: request, path: path, context: context))
             }
         }
     }

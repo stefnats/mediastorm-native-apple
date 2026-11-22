@@ -72,13 +72,16 @@ struct PlaybackRequest {
     /// The playback speed picked in the player, carried into Up Next and a source switch (a new
     /// playback from the details page starts at 1x).
     var speed: Float = 1
+    /// Explicit combined-file consent cannot be reused for an external release.
+    var fileOnlyPlayback = false
+    var allowsExternalSourceSelection: Bool { !fileOnlyPlayback }
 
     #if DEBUG
     /// `SoftwarePlayerProbe` plays a local file under a made-up title; it must not reach watch history.
     var reportsProgress = true
     #endif
 
-    var isEpisode: Bool { episode != nil }
+    var isEpisode: Bool { !fileOnlyPlayback && episode != nil }
 
     /// The copy to play: the one picked, else this movie's or episode's best.
     var preferredLibraryVersion: LibraryVersion? {
@@ -87,7 +90,7 @@ struct PlaybackRequest {
 
     /// An unmatched library file (a home video): its progress is keyed by its stream path, as
     /// in the Expo app, since no catalog id names it.
-    var isUnmatchedLibraryFile: Bool { libraryVersion != nil && !title.hasCatalogIDs }
+    var isUnmatchedLibraryFile: Bool { fileOnlyPlayback || libraryVersion != nil && !title.hasCatalogIDs }
     var progressMediaType: String { isEpisode ? "episode" : "movie" }
 
     /// Exact start position in seconds (a percentage resume is applied once the duration is known).
@@ -133,6 +136,9 @@ struct PlaybackRequest {
 
     /// `streamMetadataQuery` for the stream at `path`: an unmatched library file goes by its path.
     func streamMetadata(path: String) -> [String: String] {
+        if fileOnlyPlayback {
+            return ["mediaType": "movie", "itemId": path, "movieName": title.name, "title": title.name]
+        }
         var q = streamMetadataQuery
         if isUnmatchedLibraryFile {
             q["itemId"] = path
@@ -145,6 +151,7 @@ struct PlaybackRequest {
     /// The next episode from the start, if there is one. Its loading art leads with its own
     /// still in place of this episode's. It plays its own library copy, if it has one.
     var nextEpisode: PlaybackRequest? {
+        guard !fileOnlyPlayback else { return nil }
         guard let next = following.first else { return nil }
         var art = artwork
         art.backdropURLs.removeAll { $0 == episode?.imageURL }
@@ -201,6 +208,11 @@ struct PlaybackRequest {
         if let sourcePath { body["sourcePath"] = sourcePath }
         if let ahead = stream.bufferAhead { body["bufferAheadSeconds"] = ahead }
         if let mbps = stream.requiredMbps { body["requiredBandwidthMbps"] = mbps }
+        if fileOnlyPlayback {
+            body["itemId"] = sourcePath
+            body["movieName"] = t.name
+            return body
+        }
         if isUnmatchedLibraryFile, let sourcePath {
             // Keyed by the stream path, with no catalog ids (the Expo app's rule).
             body["itemId"] = sourcePath

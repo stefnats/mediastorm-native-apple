@@ -4,7 +4,7 @@ This package adds an explicit report dialog to the native player's Settings menu
 when playback came from a prepared server entry. It uses the server's current
 source version, requested language and actual audio-track indices. A manual
 library/source URL without a prepared entry does not acquire reporting permission.
-The existing Switch Source picker remains available for those files.
+The existing Switch Source picker remains available for ordinary files; confirmed combined episode files keep their file-only identity and cannot switch to external releases.
 
 Report-only, history reset, prepare-alternative, play-alternative and undo are
 separate actions. A saved report with a failed reset/retry remains an explicit
@@ -72,3 +72,27 @@ automatic watched update for all members is manufactured. The same coordinator
 handles TV and iPhone/iPad. New XCTest cases cover mapping, progress metadata,
 malformed descriptors, legacy single-episode compatibility and pre-cancelled
 consent; an actual remote-control/device interaction remains to be validated.
+
+## Progress and replacement ownership
+
+Wrong-content reports pause the actual player, permanently stop its progress
+admission and await all admitted HTTP writes and their background cleanup before
+POST. Reset is refused after an unconfirmed old write. Normal alternative handoff
+also drains old writes, including its final write, before presenting the new player.
+Alternatives are polled to ready while the old player remains open. The final
+readiness/episode check precedes pause and dismissal. Beginning, Current and
+Current minus 10 seconds read the engine at the confirmed handoff; wrong-content
+alternatives always start at zero. The opening-dialog position is not reused.
+
+The release-retry owner tracks at most 64 original prequeue IDs, including pending
+POSTs. A late receipt cannot DELETE a deduplicated ID owned by another dialog or
+player. New POSTs wait for any already-started DELETE. Completed records are removed;
+unknown DELETEs retain a bounded record and show an explicit cancellation-retry
+choice. Retrying cleanup uses the original captured credentials. No timer pretends
+an uncertain DELETE succeeded. The record is removed after confirmed cleanup.
+This owner coordinates only release-retry resources, not authentication or sessions.
+
+All normal, warm and prefetched prequeue requests use the same capability-bound
+`automaticLibrarySelection` builder. Old servers receive no unknown extension
+field. Cast progress retains its original viewer and physical-file/catalogue key,
+including when the phone changes profile while casting.

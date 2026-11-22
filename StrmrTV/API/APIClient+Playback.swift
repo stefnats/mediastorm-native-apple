@@ -72,8 +72,17 @@ extension APIClient {
     }
 
     func startPrequeue(_ body: [String: Any]) async throws -> PrequeueStartResponse {
-        try await send("POST", "/api/playback/prequeue", jsonObject: body,
-                       headers: AdaptiveThroughput.shared.requestHeaders())
+        let context = sourceContext()
+        guard let title = body["titleId"] as? String, !title.isEmpty else {
+            throw APIError.notReady("The title is unavailable")
+        }
+        let preference = try await contentLocalPreference(title, context: context)
+        try requireSourceContext(context)
+        // Ordinary playback keeps the existing refresh/PIN recovery behavior.
+        // Only report/retry mutations use the no-replay source-action transport.
+        return try await send("POST", "/api/playback/prequeue",
+            jsonObject: ContentLocalPreference.prequeueBody(body, supported: preference.supported),
+            headers: AdaptiveThroughput.shared.requestHeaders())
     }
 
     func prequeueStatus(_ id: String) async throws -> PrequeueStatus {

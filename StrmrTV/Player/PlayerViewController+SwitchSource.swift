@@ -10,11 +10,13 @@ import UIKit
 extension PlayerViewController {
     /// The Settings menu's Switch Source… row.
     func switchSourceAction() -> UIAction {
-        NativeChrome.switchSourceAction { [weak self] in self?.presentSourcePicker() }
+        let action = NativeChrome.switchSourceAction { [weak self] in self?.presentSourcePicker() }
+        if !request.allowsExternalSourceSelection { action.attributes = [.disabled] }
+        return action
     }
 
     func presentSourcePicker() {
-        guard presentedViewController == nil, !engine.isLive, !didFinish else { return }
+        guard request.allowsExternalSourceSelection, presentedViewController == nil, !engine.isLive, !didFinish else { return }
         if softwareSurfaceMounted { softwareHUD.flash() }
         log.notice("switch source: list opened (route \(self.engine.videoRoute.rawValue))")
         if sourceList?.results.isEmpty ?? true { subtitleStatus.show(String(localized: "Finding sources…"), hideAfter: nil) }
@@ -55,7 +57,7 @@ extension PlayerViewController {
 
     /// Stops this stream and plays `result` from the current position, carrying the languages.
     private func switchSource(to result: SourceResult) {
-        guard !didFinish, !isAdvancing else { return }
+        guard request.allowsExternalSourceSelection, !didFinish, !isAdvancing else { return }
         isAdvancing = true
         let position = lastKnownPosition
         let carry = currentTrackCarry()

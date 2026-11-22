@@ -19,6 +19,9 @@ final class PlayerViewController: EnginePlayerViewController {
     lazy var softwareHUD = SoftwareTransportHUD(title: request.displayTitle, subtitle: request.displaySubtitle)
     private lazy var telemetry = VodPlaybackTelemetry(engine: engine, log: log)
     var progressTimer: Timer?
+    let progressViewer = APIClient.shared.sourceContext()
+    lazy var progressWriter = PlayerProgressWriter(viewer: progressViewer, observer: self)
+    var releaseHandoffTask: Task<Void, Never>?
     var loadTask: Task<Void, Never>?
     var didFinish = false
     lazy var skipSegments = SkipSegments(request: request)
@@ -90,6 +93,7 @@ final class PlayerViewController: EnginePlayerViewController {
     var currentSource = SourceSwitch.Current()
     var trackCarry: TrackCarry?
     var sourceList: SourceSwitchList?
+    var reportedWrongContent = false
     var releaseReportModel: ReleaseReportModel?
     var autoSwitchState = AutoSwitchState()
 
@@ -325,15 +329,12 @@ final class PlayerViewController: EnginePlayerViewController {
         thumbnails.cancel()
         onlineSubtitles.cancel()
         sourceList?.cancel()
+        releaseHandoffTask?.cancel()
         releaseReportModel?.close()
-        if let context = currentSource.reportContext, let id = currentSource.prequeueID {
+        if let lease = currentSource.replacementLease {
             Task {
-                do { try await APIClient.shared.cancelReleaseReplacement(id, context: context) }
-                catch {
-                    if APIClient.shared.isCurrent(context) {
-                        PlaybackCoordinator.shared.errorMessage = String(localized: "The alternative cancellation could not be confirmed.")
-                    }
-                }
+                do { try await lease.release() }
+                catch { PlaybackCoordinator.shared.errorMessage = error.localizedDescription }
             }
         }
         subtitleStatus.hide()

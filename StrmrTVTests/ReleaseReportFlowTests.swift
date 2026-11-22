@@ -19,6 +19,8 @@ final class ReleaseReportFlowTests: XCTestCase {
         var holdSubmission = false
         var holdCleanup = false
         var pending: CheckedContinuation<ReleaseReportReply, Error>?
+        var pendingStatus: CheckedContinuation<PrequeueStatus, Error>?
+        var holdStatus = false
         var pendingCleanup: CheckedContinuation<Void, Never>?
 
         func sourceContext() -> SourceActionContext { current }
@@ -33,6 +35,11 @@ final class ReleaseReportFlowTests: XCTestCase {
                 return try await withCheckedThrowingContinuation { pending = $0 }
             }
             return reply
+        }
+        func releaseReplacementStatus(_ id: String, context: SourceActionContext) async throws -> PrequeueStatus {
+            if holdStatus { return try await withCheckedThrowingContinuation { pendingStatus = $0 } }
+            return try JSONDecoder().decode(PrequeueStatus.self,
+                from: Data("{\"prequeueId\":\"\(id)\",\"status\":\"ready\",\"streamPath\":\"synthetic/ready.mkv\"}".utf8))
         }
         func cancelReleaseReplacement(_ id: String, context: SourceActionContext) async throws {
             try Task.checkCancellation()
@@ -55,6 +62,12 @@ final class ReleaseReportFlowTests: XCTestCase {
         }
     }
 
+    @MainActor
+    private final class ProgressOwner: ReleaseReportProgressOwner {
+        func prepareWrongContentReport(resetHistory: Bool) async throws { }
+    }
+    private let progressOwner = ProgressOwner()
+
     private var submission: ReleaseReportSubmission {
         ReleaseReportSubmission(reason: .missingLanguage, retry: false, resetHistory: false,
                                 audioTrackIndex: nil, position: 120)
@@ -66,7 +79,8 @@ final class ReleaseReportFlowTests: XCTestCase {
     }
 
     private func loaded(_ api: FakeAPI) async -> ReleaseReportModel {
-        let model = ReleaseReportModel(prequeueID: "original-entry", api: api)
+        let model = ReleaseReportModel(prequeueID: "original-entry", api: api, progressOwner: progressOwner,
+                                       ownership: ReleaseReplacementOwnership())
         model.load()
         await model.waitForOperation()
         return model
@@ -195,11 +209,13 @@ final class ReleaseReportFlowTests: XCTestCase {
         model.submit(ReleaseReportSubmission(reason: nil, retry: true, resetHistory: false, audioTrackIndex: nil, position: 25))
         await model.waitForOperation()
         XCTAssertNil(api.submissions.first?.reason)
-        XCTAssertEqual(model.takeReplacement()?.position, 25)
+        let transfer = model.takeReplacement()
+        XCTAssertEqual(transfer?.position, 25)
         XCTAssertNil(model.takeReplacement())
         model.close()
         await model.waitForCleanup()
         XCTAssertTrue(api.cancelled.isEmpty)
+        try? await transfer?.lease.release()
     }
 
     func testInvalidTrackNeverReachesMutationTransport() async {
@@ -231,4 +247,61 @@ final class ReleaseReportFlowTests: XCTestCase {
         model.close()
         await model.waitForCleanup()
     }
+    func testAlternativeCannotTransferUntilActualReadyStatusReturns() async throws {
+        let api = FakeAPI()
+        api.holdStatus = true
+        api.reply = ReleaseReportReply(report: nil, replacement: .init(prequeueId: "ready-next", status: "queued"),
+            resumePosition: 120, historyReset: nil, historyResetError: nil, retryError: nil)
+        let model = await loaded(api)
+        model.submit(ReleaseReportSubmission(reason: nil, retry: true, resetHistory: false, audioTrackIndex: nil, position: 120))
+        await api.until { api.pendingStatus != nil }
+        XCTAssertNotNil(api.pendingStatus)
+        XCTAssertFalse(model.alternativeAvailable)
+        XCTAssertNil(model.takeReplacement())
+        let ready = try JSONDecoder().decode(PrequeueStatus.self,
+            from: Data(#"{"prequeueId":"ready-next","status":"ready","streamPath":"synthetic/ready"}"#.utf8))
+        api.pendingStatus?.resume(returning: ready)
+        api.pendingStatus = nil
+        await model.waitForOperation()
+        XCTAssertTrue(model.alternativeAvailable)
+        model.close()
+        await model.waitForCleanup()
+    }
+
+    func testLateClosedDialogReceiptDoesNotDeleteAlternativeTransferredByNewDialog() async {
+        let ownership = ReleaseReplacementOwnership()
+        let apiA = FakeAPI()
+        let apiB = FakeAPI()
+        apiA.holdSubmission = true
+        let reply = ReleaseReportReply(report: nil, replacement: .init(prequeueId: "deduplicated", status: "queued"),
+            resumePosition: 0, historyReset: nil, historyResetError: nil, retryError: nil)
+        apiA.reply = reply
+        apiB.reply = reply
+        let a = ReleaseReportModel(prequeueID: "original-entry", api: apiA, ownership: ownership)
+        let b = ReleaseReportModel(prequeueID: "original-entry", api: apiB, ownership: ownership)
+        a.load(); b.load()
+        await a.waitForOperation(); await b.waitForOperation()
+        let retry = ReleaseReportSubmission(reason: nil, retry: true, resetHistory: false, audioTrackIndex: nil, position: 0)
+        a.submit(retry)
+        await apiA.until { apiA.pending != nil }
+        XCTAssertNotNil(apiA.pending)
+        a.close()
+        b.submit(retry)
+        await b.waitForOperation()
+        guard let playerB = b.takeReplacement() else {
+            apiA.returnReceipt(); await a.waitForCleanup(); b.close(); await b.waitForCleanup()
+            return XCTFail("New dialog did not take the ready alternative")
+        }
+        b.close()
+        await b.waitForCleanup()
+        apiA.returnReceipt()
+        await a.waitForCleanup()
+        XCTAssertTrue(apiA.cancelled.isEmpty)
+        XCTAssertTrue(apiB.cancelled.isEmpty)
+        try? await playerB.lease.release()
+        XCTAssertEqual(apiB.cancelled.map { $0.0 }, ["deduplicated"])
+        XCTAssertEqual(apiB.cancelled.first?.1, b.context)
+        XCTAssertEqual(ownership.retainedOriginals, 0)
+    }
+
 }

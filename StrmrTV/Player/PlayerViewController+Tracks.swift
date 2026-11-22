@@ -165,11 +165,13 @@ extension PlayerViewController {
 
     /// The Settings menu's rows after the speeds: Switch Source… (and the phone's own rows).
     private func settingsMenuExtras() -> [UIMenuElement] {
+        let sources: [UIMenuElement] = request.allowsExternalSourceSelection
+            ? [switchSourceAction(), releaseReportAction()] : []
         #if os(iOS)
         // A downloaded file is the one copy on the device: nothing to switch to.
-        return (playsDownload ? [] : [switchSourceAction(), releaseReportAction()]) + [audioOffsetItem] + mobileSettingsExtras()
+        return (playsDownload ? [] : sources) + [audioOffsetItem] + mobileSettingsExtras()
         #else
-        return [switchSourceAction(), releaseReportAction(), audioOffsetItem]
+        return sources + [audioOffsetItem]
         #endif
     }
 

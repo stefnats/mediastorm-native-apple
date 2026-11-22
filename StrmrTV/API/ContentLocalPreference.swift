@@ -7,6 +7,14 @@ struct ContentLocalPreference: Decodable, Sendable {
 
     var supported: Bool { localSourcePreferenceSupported == true }
 
+    static func prequeueBody(_ original: [String: Any], supported: Bool) -> [String: Any] {
+        var body = original
+        // The ordinary, prefetch and prewarm callers all use startPrequeue.
+        // Old strict decoders must never receive this extension field.
+        body["automaticLibrarySelection"] = supported ? true : nil
+        return body
+    }
+
     static func updateBody(_ value: Bool?, contentID: String, contentType: String) -> [String: Any] {
         ["contentId": contentID, "contentType": contentType,
          "preferLocalFiles": value.map { $0 as Any } ?? NSNull()]

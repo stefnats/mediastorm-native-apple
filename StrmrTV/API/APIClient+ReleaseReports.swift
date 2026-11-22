@@ -7,6 +7,7 @@ protocol ReleaseReportAPI: AnyObject {
     func releaseReportOptions(_ id: String, context: SourceActionContext) async throws -> ReleaseReportOptions
     func submitReleaseAction(_ id: String, options: ReleaseReportOptions, submission: ReleaseReportSubmission,
                              context: SourceActionContext) async throws -> ReleaseReportReply
+    func releaseReplacementStatus(_ id: String, context: SourceActionContext) async throws -> PrequeueStatus
     func cancelReleaseReplacement(_ id: String, context: SourceActionContext) async throws
     func deleteReleaseReport(_ id: String, context: SourceActionContext) async throws
 }

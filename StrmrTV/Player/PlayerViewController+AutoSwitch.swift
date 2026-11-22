@@ -31,7 +31,7 @@ extension PlayerViewController {
 
     /// From the start of loading, so a source that never starts is caught too.
     func startAutoSwitchWatch() {
-        guard request.libraryVersion == nil, !engine.isLive, !playsDownload else { return }
+        guard request.allowsExternalSourceSelection, request.libraryVersion == nil, !engine.isLive, !playsDownload else { return }
         autoSwitchState.timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.sampleAutoSwitchWatch() }
         }
@@ -68,7 +68,8 @@ extension PlayerViewController {
     /// false means the caller handles the failure itself, right away.
     @discardableResult
     func autoSwitch(because reason: String, onGiveUp: (() -> Void)? = nil) -> Bool {
-        guard AutoSwitchSettingsStore.shared.enabled, !autoSwitchState.isSwitching, request.libraryVersion == nil,
+        guard request.allowsExternalSourceSelection, progressWriter.accepting,
+              AutoSwitchSettingsStore.shared.enabled, !autoSwitchState.isSwitching, request.libraryVersion == nil,
               !didFinish, !isAdvancing, !isExitingToDetails, !engine.isLive, !playsDownload else { return false }
         guard request.autoSwitchCount < Self.autoSwitchLimit else {
             log.notice("auto switch: \(reason); already switched \(self.request.autoSwitchCount) times, staying")

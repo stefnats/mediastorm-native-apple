@@ -56,6 +56,10 @@ final class PlaybackCoordinator: ObservableObject {
     /// Explicit Versions picks play their file; automatic library choices honor
     /// the server's source-preference capability before using the prequeue.
     func play(_ request: PlaybackRequest, picks: PrequeuePick? = nil) {
+        guard !request.fileOnlyPlayback || request.libraryVersion != nil else {
+            errorMessage = String(localized: "Choose the combined library file explicitly again.")
+            return
+        }
         if let explicit = request.libraryVersion { return playLibrary(request, version: explicit) }
         guard let legacyCopy = request.preferredLibraryVersion else { return playPrequeue(request, picks: picks) }
         guard resolving == nil else { return }
@@ -108,36 +112,33 @@ final class PlaybackCoordinator: ObservableObject {
         }
     }
 
-    /// Explicit replacement only: polling never starts another preparation or
-    /// silently falls back to a different source if this one fails.
-    func playReportedAlternative(_ request: PlaybackRequest, id: String,
+    /// Takes an already-ready replacement and its exact dialog-owned lease.
+    func playReportedAlternative(_ request: PlaybackRequest, ready: PrequeueStatus,
+                                 lease: ReleaseReplacementOwnership.Lease,
                                  context: SourceActionContext, carry: TrackCarry) {
         guard resolving == nil, api.isCurrent(context) else {
-            discardReportedAlternative(id, context: context)
+            discardReportedAlternative(lease)
             return
         }
-        begin(request, stage: String(localized: "Preparing alternative…"), carry: carry) { [self] in
+        begin(request, stage: String(localized: "Starting alternative…"), carry: carry) {
             do {
-                let resolved = try await awaitPrequeue(id, expecting: request.episode, context: context)
-                if request.episode == nil, resolved.targetEpisode != nil {
-                    throw APIError.notReady("The alternative belongs to another episode")
-                }
-                guard let path = resolved.streamPath else { throw APIError.notReady("Alternative has no stream") }
-                var source = SourceSwitch.Current(resolved, path: path, context: context)
+                try ReleaseAlternativeHandoff.validate(ready, id: lease.id, request: request)
+                var source = SourceSwitch.Current(ready, path: ready.streamPath!, context: context)
                 source.reportContext = context
-                return (path, TrackPreferences(resolved), source)
+                source.replacementLease = lease
+                return (ready.streamPath!, TrackPreferences(ready), source)
             } catch {
-                let cleanup = Task { try await api.cancelReleaseReplacement(id, context: context) }
+                let cleanup = Task { try await lease.release() }
                 _ = try? await cleanup.value
                 throw error
             }
         }
     }
 
-    private func discardReportedAlternative(_ id: String, context: SourceActionContext) {
+    private func discardReportedAlternative(_ lease: ReleaseReplacementOwnership.Lease) {
         Task { [self] in
-            do { try await api.cancelReleaseReplacement(id, context: context) }
-            catch { if api.isCurrent(context) { errorMessage = String(localized: "The alternative cancellation could not be confirmed.") } }
+            do { try await lease.release() }
+            catch { errorMessage = error.localizedDescription }
         }
     }
 
@@ -147,6 +148,10 @@ final class PlaybackCoordinator: ObservableObject {
     /// re-picks the previous source's audio and subtitle languages; `resolved` skips the resolve (Auto Switch).
     func play(_ request: PlaybackRequest, source: SourceResult, tracks manual: ManualTrackPick? = nil,
               carry: TrackCarry? = nil, resolved: (path: String, tracks: TrackSelection?)? = nil) {
+        guard request.allowsExternalSourceSelection else {
+            errorMessage = String(localized: "A combined library file cannot switch to an external release.")
+            return
+        }
         // A stream picked over a library copy (Switch Source) is no longer that copy.
         var streamed = request
         streamed.libraryVersion = nil
@@ -191,8 +196,8 @@ final class PlaybackCoordinator: ObservableObject {
                 let (path, tracks, source) = try await resolve()
                 var transferred = false
                 defer {
-                    if !transferred, let context = source.reportContext, let id = source.prequeueID {
-                        discardReportedAlternative(id, context: context)
+                    if !transferred, let lease = source.replacementLease {
+                        discardReportedAlternative(lease)
                     }
                 }
                 try Task.checkCancellation()
@@ -269,12 +274,16 @@ final class PlaybackCoordinator: ObservableObject {
     /// Starts resolving `request` on the server ahead of time (the player calls this near the
     /// end of an episode), so the next episode starts quickly. Failures are left for `play`.
     func prefetch(_ request: PlaybackRequest) {
-        guard request.preferredLibraryVersion == nil else { return }  // plays its library copy
+        guard request.libraryVersion == nil, !request.fileOnlyPlayback else { return }
         let key = request.prequeueKey
         guard prefetched?.key != key else { return }
         prefetched = (key, "")
         Task {
             do {
+                if request.preferredLibraryVersion != nil {
+                    let preference = try await api.contentLocalPreference(request.title.titleID, context: api.sourceContext())
+                    guard preference.supported else { prefetched = nil; return }
+                }
                 let started = try await api.startPrequeue(prequeueBody(request))
                 if prefetched?.key == key { prefetched = (key, started.prequeueId) }
             } catch {
@@ -287,7 +296,7 @@ final class PlaybackCoordinator: ObservableObject {
     /// Play starts quickly, unless the profile turned prequeue off (`disablePrequeue`). At most
     /// once per title and profile every ten minutes.
     func prewarm(_ target: DetailsTarget) {
-        guard !target.fromLibrary else { return }  // Play uses the library's copy
+        guard target.hasCatalogIDs else { return }
         let profile = api.profileID
         if let warmed, warmed.titleID == target.titleID, warmed.profile == profile,
            Date().timeIntervalSince(warmed.started) < 600 { return }
@@ -296,6 +305,10 @@ final class PlaybackCoordinator: ObservableObject {
         let body = prequeueBody(PlaybackRequest(title: target, episode: nil, start: nil))
         warm = WarmPrequeue(titleID: target.titleID, profile: profile, phase: .resolving)
         let task = Task { [api] () -> String? in
+            if target.fromLibrary {
+                guard let preference = try? await api.contentLocalPreference(target.titleID, context: api.sourceContext()),
+                      preference.supported else { self.settleWarm(target.titleID, profile, .unavailable); return nil }
+            }
             guard await self.playbackSettings().prequeueOnOpen,
                   let id = try? await api.startPrequeue(body).prequeueId else {
                 self.settleWarm(target.titleID, profile, .unavailable)

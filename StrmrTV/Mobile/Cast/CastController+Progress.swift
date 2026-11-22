@@ -67,10 +67,9 @@ extension CastController {
         let duration = state.duration
         let position = ended ? max(state.position, duration) : state.position
         guard duration > 0, position > 0 else { return }
-        let body = playback.request.progressReport(position: position, duration: duration,
-                                                   paused: state.phase == .paused, ended: ended,
-                                                   sourcePath: playback.path)
-        Task { await APIClient.shared.reportProgress(body) }
+        let body = playback.body(position: position, duration: duration,
+                                                   paused: state.phase == .paused, ended: ended)
+        Task { await APIClient.shared.reportOriginalProgress(body, context: playback.context) }
     }
 
     /// The server reaps an HLS session that goes quiet for a minute, and a paused receiver

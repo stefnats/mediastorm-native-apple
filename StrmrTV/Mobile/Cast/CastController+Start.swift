@@ -12,7 +12,7 @@ extension CastController {
         let transport: CastTransport
         let media: CastMedia
         let hlsSessionID: String?
-        let playback: (request: PlaybackRequest, path: String)?
+        let playback: OriginalPlaybackProgress?
     }
 
     func begin(_ session: Session, prepare: @escaping @MainActor () async throws -> Prepared) async {

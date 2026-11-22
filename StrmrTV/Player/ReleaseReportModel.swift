@@ -16,12 +16,20 @@ final class ReleaseReportModel: ObservableObject {
     let prequeueID: String
     let context: SourceActionContext
     private let api: any ReleaseReportAPI
+    private weak var progressOwner: (any ReleaseReportProgressOwner)?
+    private let ownership: ReleaseReplacementOwnership
+    private var replacementLease: ReleaseReplacementOwnership.Lease?
+    private(set) var wrongContent = false
     private var operation: Task<Void, Never>?
     private var cleanup: Task<Void, Never>?
 
-    init(prequeueID: String, context: SourceActionContext? = nil, api: any ReleaseReportAPI = APIClient.shared) {
+    init(prequeueID: String, context: SourceActionContext? = nil, api: any ReleaseReportAPI = APIClient.shared,
+         progressOwner: (any ReleaseReportProgressOwner)? = nil,
+         ownership: ReleaseReplacementOwnership = .shared) {
+        self.ownership = ownership
         self.prequeueID = prequeueID
         self.api = api
+        self.progressOwner = progressOwner
         self.context = context ?? api.sourceContext()
     }
 
@@ -52,41 +60,104 @@ final class ReleaseReportModel: ObservableObject {
         operation = Task { [self] in
             defer { busy = false }
             guard !closed, !Task.isCancelled else { return }
+            var actionSent = false
+            var acknowledged = false
+            var reservation: ReleaseReplacementOwnership.Request?
+            defer { if let reservation { ownership.finish(reservation) } }
             do {
+                if submission.reason?.permitsHistoryReset == true {
+                    guard let progressOwner else {
+                        throw APIError.notReady("The active player's progress must be stopped before reporting wrong content")
+                    }
+                    wrongContent = true
+                    try await progressOwner.prepareWrongContentReport(resetHistory: submission.resetHistory)
+                    try Task.checkCancellation()
+                    guard !closed, api.isCurrent(context) else { return }
+                }
+                if submission.retry {
+                    reservation = try await ownership.begin(original: prequeueID, context: context)
+                    try Task.checkCancellation()
+                    guard !closed, api.isCurrent(context) else { return }
+                }
+                actionSent = true
                 let reply = try await api.submitReleaseAction(prequeueID, options: options,
                                                               submission: submission, context: context)
+                acknowledged = true
+                let lease: ReleaseReplacementOwnership.Lease?
+                if let next = reply.replacement, let reservation {
+                    lease = try ownership.adopt(next.prequeueId, request: reservation, api: api, context: context)
+                } else { lease = nil }
+                if let reservation { ownership.finish(reservation) }
                 // A late receipt still owns cleanup, but cannot publish into a
                 // closed dialog or whichever profile is now active.
                 guard !closed, !Task.isCancelled, api.isCurrent(context) else {
-                    if let next = reply.replacement { await cancelKnownReplacement(next.prequeueId) }
+                    if let lease { await release(lease) }
                     return
                 }
+                replacementLease = lease
                 replacement = reply.replacement
                 savedReportID = reply.report?.id
                 resumePosition = reply.resumePosition
-                alternativeAvailable = reply.partialFailure == nil && reply.replacement?.prequeueId.isEmpty == false
-                    && reply.resumePosition.map { $0.isFinite && $0 >= 0 } == true
                 message = reply.partialFailure ?? (reply.report == nil
-                    ? String(localized: "Alternative prepared. Choose Play Alternative to switch.")
+                    ? String(localized: "Preparing alternative while the current player stays open…")
                     : String(localized: "Report saved."))
+                if reply.partialFailure == nil, let lease {
+                    let deadline = Date().addingTimeInterval(180)
+                    while Date() < deadline {
+                        let ready = try await api.releaseReplacementStatus(lease.id, context: context)
+                        try Task.checkCancellation()
+                        guard !closed, api.isCurrent(context) else { return }
+                        if ready.status == "ready", ready.streamPath?.isEmpty == false {
+                            alternativeAvailable = true
+                            message = String(localized: "Alternative ready. Choose where to start and press Play Alternative.")
+                            return
+                        }
+                        if ready.status == "failed" || ready.status == "expired" {
+                            throw APIError.notReady(ready.error ?? "The alternative is unavailable. The current player was kept open.")
+                        }
+                        try await Task.sleep(for: .milliseconds(500))
+                    }
+                    throw APIError.notReady("The alternative is not ready yet. The current player was kept open.")
+                }
             } catch {
                 // No automatic POST retry: the server may already have saved a
                 // report even when its acknowledgement did not reach this device.
                 if !closed {
-                    outcomeUnknown = true
-                    message = String(localized: "The action could not be confirmed. Reopen the dialog before trying again.")
+                    outcomeUnknown = actionSent && !acknowledged
+                    message = outcomeUnknown ? String(localized: "The action could not be confirmed. Reopen the dialog before trying again.")
+                        : error.localizedDescription
                 }
             }
         }
     }
 
     /// A replacement is transferred only by an explicit Play Alternative press.
-    func takeReplacement() -> (id: String, position: Double)? {
-        guard !busy, !closed, alternativeAvailable, api.isCurrent(context), let replacement,
-              let position = resumePosition, position.isFinite, position >= 0 else { return nil }
-        self.replacement = nil
+    struct Transfer {
+        let lease: ReleaseReplacementOwnership.Lease
+        let position: Double
+        var id: String { lease.id }
+    }
+
+    func takeReplacement() -> Transfer? {
+        guard !busy, !closed, alternativeAvailable, api.isCurrent(context), let lease = replacementLease else { return nil }
+        replacementLease = nil
+        replacement = nil
         alternativeAvailable = false
-        return (replacement.prequeueId, position)
+        return Transfer(lease: lease, position: resumePosition ?? 0)
+    }
+
+    var cleanupNeedsRetry: Bool { ownership.needsCleanupRetry(original: prequeueID, context: context) }
+
+    func retryCleanup() {
+        guard !busy, !closed, api.isCurrent(context) else { return }
+        busy = true
+        operation = Task { [self] in
+            defer { busy = false }
+            do {
+                try await ownership.retryCleanup(original: prequeueID, context: context)
+                message = String(localized: "Alternative cancellation confirmed. You can try preparing an alternative again.")
+            } catch { message = error.localizedDescription }
+        }
     }
 
     func undoReport() {
@@ -123,20 +194,17 @@ final class ReleaseReportModel: ObservableObject {
     func waitForCleanup() async { await cleanup?.value }
 
     private func discardReplacement() async {
-        guard let replacement else { return }
-        self.replacement = nil
+        guard let lease = replacementLease else { return }
+        replacementLease = nil
+        replacement = nil
         alternativeAvailable = false
-        await cancelKnownReplacement(replacement.prequeueId)
+        await release(lease)
     }
 
-    private func cancelKnownReplacement(_ id: String) async {
-        // Independent of a cancelled POST task; await the actual DELETE task.
-        let request = Task { try await api.cancelReleaseReplacement(id, context: context) }
-        do { try await request.value }
-        catch {
-            if !closed, api.isCurrent(context) {
-                message = String(localized: "The alternative cancellation could not be confirmed. It was not played.")
-            }
-        }
+    private func release(_ lease: ReleaseReplacementOwnership.Lease) async {
+        // Cancellation of the dialog never cancels the actual owned DELETE.
+        let task = Task { try await lease.release() }
+        do { try await task.value }
+        catch { if !closed { message = error.localizedDescription } }
     }
 }

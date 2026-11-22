@@ -6,10 +6,11 @@ import SwiftUI
 struct ReleaseReportView: View {
     @ObservedObject var model: ReleaseReportModel
     let position: Double
-    let onPlay: (String, Double) -> Void
+    let onPlay: (ReleaseReportModel.Transfer, ReleaseAlternativeStart) -> Void
     let onClose: () -> Void
     @State private var reason = ReleaseReportReason.fileProblem
     @State private var audioTrack: Int?
+    @State private var alternativeStart = ReleaseAlternativeStart.current
     @State private var resetHistory = false
 
     var body: some View {
@@ -60,13 +61,21 @@ struct ReleaseReportView: View {
                         Button("Undo this report") { model.undoReport() }.disabled(model.busy)
                     }
                     if model.alternativeAvailable {
+                        if !model.wrongContent {
+                            Picker("Start alternative", selection: $alternativeStart) {
+                                ForEach(ReleaseAlternativeStart.allCases) { Text($0.label).tag($0) }
+                            }
+                        } else { Text("Wrong-content alternatives always start at the beginning.") }
                         Button("Play Alternative") {
                             guard let next = model.takeReplacement() else { return }
-                            onPlay(next.id, next.position)
+                            onPlay(next, alternativeStart)
                         }
                     }
                 } else if !model.busy {
                     Text("No reportable prepared source is available. Use Switch Source for manual library files or older servers.")
+                }
+                if model.cleanupNeedsRetry {
+                    Button("Retry alternative cancellation") { model.retryCleanup() }.disabled(model.busy)
                 }
                 if model.busy { ProgressView() }
                 if let message = model.message { Text(message) }

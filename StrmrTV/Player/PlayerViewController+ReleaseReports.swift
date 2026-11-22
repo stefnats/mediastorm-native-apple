@@ -18,37 +18,67 @@ extension PlayerViewController {
             subtitleStatus.show(String(localized: "Profile or connection changed. Reopen playback before reporting."), hideAfter: 5)
             return
         }
-        let model = ReleaseReportModel(prequeueID: id, context: context)
+        let model = ReleaseReportModel(prequeueID: id, context: context, progressOwner: self)
         releaseReportModel?.close()
         releaseReportModel = model
         let host = UIHostingController(rootView: ReleaseReportView(model: model,
-            position: max(0, lastKnownPosition), onPlay: { [weak self] id, position in
+            position: max(0, lastKnownPosition), onPlay: { [weak self] transfer, start in
                 guard let self, !self.didFinish else {
                     model.close()
-                    Task { try? await APIClient.shared.cancelReleaseReplacement(id, context: model.context) }
+                    Task { try? await transfer.lease.release() }
                     return
                 }
-                self.playReportedAlternative(id: id, position: position, context: model.context)
+                self.playReportedAlternative(transfer: transfer, start: start, context: model.context)
             }, onClose: { [weak self] in self?.presentedViewController?.dismiss(animated: true) }))
         host.modalPresentationStyle = .overFullScreen
         present(host, animated: true)
     }
 
-    private func playReportedAlternative(id: String, position: Double, context: SourceActionContext) {
-        guard !didFinish, !isAdvancing else {
-            Task { try? await APIClient.shared.cancelReleaseReplacement(id, context: context) }
+    private func playReportedAlternative(transfer: ReleaseReportModel.Transfer, start: ReleaseAlternativeStart,
+                                         context: SourceActionContext) {
+        guard !didFinish, !isAdvancing, request.allowsExternalSourceSelection else {
+            Task { try? await transfer.lease.release() }
             return
         }
         isAdvancing = true
-        let carry = currentTrackCarry()
-        var next = PlaybackRequest(title: request.title, episode: request.episode,
-            start: position > 0 ? .seconds(position) : nil, following: request.following, artwork: request.artwork)
-        next.speed = playbackSpeed
-        // Dismiss the dialog and then the original player. Only this explicit
-        // press transfers the acknowledged replacement to the coordinator.
-        presentedViewController?.dismiss(animated: false)
-        dismiss(animated: true) {
-            PlaybackCoordinator.shared.playReportedAlternative(next, id: id, context: context, carry: carry)
+        releaseHandoffTask = Task { [self] in
+            var transferred = false
+            defer {
+                if !transferred {
+                    isAdvancing = false
+                    Task { try? await transfer.lease.release() }
+                }
+            }
+            do {
+                // The old player remains intact until the actual ready response.
+                let ready = try await APIClient.shared.releaseReplacementStatus(transfer.id, context: context)
+                try ReleaseAlternativeHandoff.validate(ready, id: transfer.id, request: request)
+                try Task.checkCancellation()
+                guard !didFinish else { throw CancellationError() }
+                // Read the engine now, after the last network await; never reuse
+                // the position from when the report dialog was opened.
+                let position = try start.position(current: engine.currentTime, wrongContent: reportedWrongContent)
+                engine.pause()
+                progressTimer?.invalidate()
+                progressTimer = nil
+                stopAutoSwitchWatch()
+                try await progressWriter.stopAndDrain(requireKnownAcknowledgements: false)
+                try Task.checkCancellation()
+                try APIClient.shared.requireSourceContext(context)
+                guard !didFinish else { throw CancellationError() }
+                let carry = currentTrackCarry()
+                var next = PlaybackRequest(title: request.title, episode: request.episode,
+                    start: position > 0 ? .seconds(position) : nil, following: request.following, artwork: request.artwork)
+                next.speed = playbackSpeed
+                transferred = true
+                presentedViewController?.dismiss(animated: false)
+                dismiss(animated: true) {
+                    PlaybackCoordinator.shared.playReportedAlternative(next, ready: ready, lease: transfer.lease,
+                                                                        context: context, carry: carry)
+                }
+            } catch {
+                if !didFinish { subtitleStatus.show(error.localizedDescription, hideAfter: 8) }
+            }
         }
     }
 }

@@ -58,12 +58,12 @@ extension PlayerViewController {
         log.notice("handing off to \(device.name) at \(Int(position))s")
         engine.pause()
         reportProgress(ended: false, paused: true)
-        let request = request, path = streamPath
+        let request = request, path = streamPath, originalContext = progressViewer
         dismiss(animated: true) {
             Task {
                 await CastController.shared.start(on: device, request: request, path: path, position: position,
                                                   audio: audio, subtitle: subtitleTrack?.id,
-                                                  subtitleLanguage: subtitleTrack?.language)
+                                                  subtitleLanguage: subtitleTrack?.language, originalContext: originalContext)
             }
         }
     }
