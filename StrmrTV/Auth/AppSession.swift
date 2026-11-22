@@ -48,7 +48,9 @@ final class AppSession: ObservableObject {
     /// Resume lock state (`+ResumeLock`): when the app left the foreground, the server's
     /// `display.alwaysShowProfileSelector` as last read, and whether the picker may be backed
     /// out of (not when it came up to re-check a PIN profile).
-    var backgroundedAt: Date?
+    let resumeGate = DeferredResumeGate()
+    var resumeActivation = UUID()
+    @Published internal(set) var protectedBrowsingBlocked = false
     var alwaysShowProfileSelector = true
     var profilePickRequired = false
 
@@ -69,6 +71,9 @@ final class AppSession: ObservableObject {
 
     private init() {
         api.onSignedOut = { [weak self] in
+            self?.resumeGate.profileActivated()
+            self?.protectedBrowsingBlocked = false
+            self?.resumeActivation = UUID()
             self?.loginNotice = String(localized: "Your session expired. Sign in again.")
             self?.phase = .login
         }
@@ -309,6 +314,9 @@ final class AppSession: ObservableObject {
     }
 
     func signOut() async {
+        resumeGate.profileActivated()
+        protectedBrowsingBlocked = false
+        resumeActivation = UUID()
         cancelChallenge()
         await api.logout()
         TopShelfSync.clear()
@@ -362,6 +370,9 @@ final class AppSession: ObservableObject {
     }
 
     private func activate(_ chosen: Profile) async {
+        resumeGate.profileActivated()
+        protectedBrowsingBlocked = false
+        resumeActivation = UUID()
         api.activate(profileID: chosen.id, profileName: chosen.name)
         profile = chosen
         profilePickRequired = false

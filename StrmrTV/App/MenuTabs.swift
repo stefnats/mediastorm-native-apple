@@ -1,4 +1,6 @@
 import SwiftUI
+import Combine
+import UIKit
 
 /// A tab of the top menu that can be hidden. Home and Settings always show: Home is where
 /// the app opens and Settings is where the menu is set.
@@ -66,6 +68,40 @@ final class MenuTabsStore: ObservableObject {
 
     func resetTabOrder() { order = [] }
 
+    @Published private(set) var kidsLiveAvailable = false
+    private var kidsLiveContext: SourceActionContext?
+    private var kidsAvailabilityGeneration = UUID()
+    private var kidsWakeObserver: NSObjectProtocol?
+    private var kidsUnlockObserver: AnyCancellable?
+
+    var showsKidsLive: Bool {
+        kidsLiveAvailable && kidsLiveContext?.sameViewer(as: APIClient.shared.sourceContext()) == true
+    }
+
+    private func watchKidsLiveAvailability() {
+        guard kidsWakeObserver == nil else { return }
+        kidsWakeObserver = NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification,
+            object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in await self?.refreshKidsLiveAvailability() }
+        }
+        kidsUnlockObserver = AppSession.shared.$protectedBrowsingBlocked.dropFirst().filter { !$0 }.sink { [weak self] _ in
+            Task { @MainActor in await self?.refreshKidsLiveAvailability() }
+        }
+    }
+
+    private func refreshKidsLiveAvailability() async {
+        let generation = UUID()
+        kidsAvailabilityGeneration = generation
+        let context = APIClient.shared.sourceContext()
+        kidsLiveAvailable = false; kidsLiveContext = nil
+        guard AppSession.shared.phase == .ready, AppSession.shared.profile?.isKidsProfile == true else { return }
+        guard let policy = try? await APIClient.shared.kidsLivePolicy(context: context),
+              generation == kidsAvailabilityGeneration, APIClient.shared.isCurrent(context),
+              AppSession.shared.profile?.isKidsProfile == true else { return }
+        kidsLiveContext = context
+        kidsLiveAvailable = policy.configured
+    }
+
     /// The profile's visible tabs, as last loaded.
     @Published private(set) var profileTabs: Set<String> = MenuTab.serverDefault
 
@@ -96,6 +132,8 @@ final class MenuTabsStore: ObservableObject {
 
     /// Shows the profile's last loaded list, then asks the server for its current one.
     func refresh(profileID: String) async {
+        watchKidsLiveAvailability()
+        await refreshKidsLiveAvailability()
         var cached = defaults.dictionary(forKey: Keys.profileTabs) as? [String: [String]] ?? [:]
         let initial = cached[profileID].map(Set.init) ?? MenuTab.serverDefault
         if initial != profileTabs { profileTabs = initial }

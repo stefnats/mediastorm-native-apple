@@ -90,7 +90,10 @@ struct MainTabs: View {
         case let .homeView(view):
             homeStack(view: view, path: viewPath(view))
         case .live:
-            NavigationStack { LiveView() }.pinsSideMenu()
+            NavigationStack {
+                if AppSession.shared.profile?.isKidsProfile == true { KidsLiveView() }
+                else { LiveView() }
+            }.pinsSideMenu()
         case .recordings:
             NavigationStack { RecordingsView() }.pinsSideMenu()
         case .sports:

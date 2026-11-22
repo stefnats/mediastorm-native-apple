@@ -43,6 +43,9 @@ struct RootView: View {
             case .ready:
                 // Rebuilt per profile so every tab reloads its data.
                 MainTabs().id(session.profile?.id)
+                    .opacity(session.protectedBrowsingBlocked ? 0 : 1)
+                    .allowsHitTesting(!session.protectedBrowsingBlocked)
+                    .accessibilityHidden(session.protectedBrowsingBlocked)
             case let .unavailable(message):
                 StartupUnavailableView(message: message)
             }
@@ -71,6 +74,8 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: playback.resolving == nil)
+        .onAppear { session.playbackReturnedToBrowsing() }
+        .onChange(of: playback.resolving == nil) { _, _ in session.playbackReturnedToBrowsing() }
         .modifier(ProfileLockPrompt(session: session))
         .guardsUnfocusedMenu()
         .alert(

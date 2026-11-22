@@ -59,6 +59,7 @@ final class MultiscreenHostController: UIHostingController<MultiscreenView> {
         super.viewDidDisappear(animated)
         guard isBeingDismissed || presentingViewController == nil else { return }
         UIApplication.shared.isIdleTimerDisabled = false
+        AppSession.shared.playbackReturnedToBrowsing()
         guard !controller.finished else { return }
         let controller = controller
         Task {
