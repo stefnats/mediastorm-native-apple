@@ -206,9 +206,12 @@ struct DisplayListPage<Item: Decodable & Sendable>: Decodable, Sendable {
     /// filter server-side.
     var genres: [String]?
     var alphabetBuckets: [String]?
+    var originalLanguageFilterSupported: Bool?
+    var storedMediaFilterSupported: Bool?
+    var storedMediaFilterBasis: String?
 
     /// How many items the list holds in all.
-    var listTotal: Int { max(sourceTotal ?? total, items.count) }
+    var listTotal: Int { max(originalLanguageFilterSupported == true || storedMediaFilterSupported == true ? total : sourceTotal ?? total, items.count) }
 }
 
 /// A watchlist entry (`display-list?source=watchlist`). `id` is the server's canonical

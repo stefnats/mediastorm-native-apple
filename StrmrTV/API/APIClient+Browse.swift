@@ -51,6 +51,10 @@ extension APIClient {
     /// other lists ignore it.
     func browsePage(_ list: BrowseList, options: BrowseOptions = BrowseOptions(), limit: Int, offset: Int = 0,
                     extra: [String: String] = [:], phase: ShelfPhase? = nil) async throws -> BrowsePage {
+        if options.savedFiltersActive || list.isDirectSavedCatalogue {
+            guard extra.isEmpty else { throw StoredMediaFailure.unsupported }
+            return try await savedMediaPage(list, options: options, limit: limit, offset: offset, context: sourceContext())
+        }
         if case let .library(library) = list {
             return try await libraryPage(library, options: options, limit: limit, offset: offset)
         }

@@ -28,6 +28,9 @@ extension APIClient {
     /// A grid page of a library (`BrowseList.library`). Default and Date Added are newest
     /// first for every source (the server's own default is A–Z for Plex and Jellyfin).
     func libraryPage(_ library: LibraryRef, options: BrowseOptions, limit: Int, offset: Int) async throws -> BrowsePage {
+        if options.savedFiltersActive {
+            return try await savedLibraryPage(library, options: options, limit: limit, offset: offset, context: sourceContext())
+        }
         let sort: (key: String, ascending: Bool) = switch options.sort {
         case .name: ("name", options.ascending)
         case .year: ("year", options.ascending)

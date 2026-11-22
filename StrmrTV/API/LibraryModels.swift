@@ -137,6 +137,9 @@ struct LibraryGroupPage: Decodable, Sendable {
     let groups: [LibraryGroup]
     let total: Int
     let alphabetBuckets: [String]?
+    var originalLanguageFilterSupported: Bool?
+    var storedMediaFilterSupported: Bool?
+    var storedMediaFilterBasis: String?
 }
 
 /// A library's copy of a title (`GET /api/library/matches`).

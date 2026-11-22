@@ -109,7 +109,7 @@ enum BrowseList: Hashable {
     }
 
     /// How the source's `display-list` items are shaped.
-    enum ItemShape { case item, ranked, title }
+    enum ItemShape: Equatable { case item, ranked, title }
 
     var itemShape: ItemShape {
         switch self {
@@ -293,6 +293,10 @@ struct BrowsePage {
     var genres: [String] = []
     /// First letters present in the filtered list, for the A–Z index.
     var letters: [String] = []
+    var savedCapability = StoredMediaCapability()
+    var savedObservation: StoredMediaObservation?
+    var savedHidden: [HiddenItem]?
+    var savedWatching: [ContinueWatchingItem]?
 
     /// The list's size once `fetched` items have been read, this page's included. Servers
     /// return short pages mid-list (TMDB genre and decade pages are capped at 50, hidden,
@@ -363,8 +367,11 @@ struct BrowseOptions: Hashable {
     var letter: String?
     /// Which of the list's `parts` is shown (0 is All when there is one).
     var part = 0
+    var originalLanguages: Set<String> = []
+    var includeUnknownOriginalLanguage = false
+    var storedMedia = StoredMediaFilters()
 
-    var isFiltered: Bool { kind != nil || watch != .all || !genres.isEmpty }
+    var isFiltered: Bool { kind != nil || watch != .all || !genres.isEmpty || savedFiltersActive }
 
     /// Picks a sort, or flips the direction when it is already the current one.
     mutating func choose(_ sort: BrowseSort) {

@@ -14,6 +14,7 @@ struct MobileBrowseMenus: View {
     var onDelete: (() -> Void)?
 
     var body: some View {
+        StoredMediaFilterEntry(list: list, options: options)
         if let onRandom {
             Button(action: onRandom) { Label("Random", systemImage: "dice") }
                 .disabled(isPicking)
@@ -130,6 +131,7 @@ struct MobileContinueWatchingGrid: View {
             }
         }
         .navigationTitle("Continue Watching")
+        .toolbar { StoredMediaFilterEntry(list: .continueWatching) }
         .refreshable { await load() }
         .task { await load() }
         .onChange(of: playback.sessionsEnded) { Task { await load() } }
@@ -184,6 +186,7 @@ struct MobileHiddenGrid: View {
             }
         }
         .navigationTitle("Hidden")
+        .toolbar { StoredMediaFilterEntry(list: .hidden) }
         .refreshable { await titles.refreshHidden() }
         .task { await titles.refreshHidden() }
     }

@@ -13,6 +13,7 @@ struct BrowseControls: View {
 
     var body: some View {
         HStack(spacing: 24) {
+            StoredMediaFilterEntry(list: list, options: options)
             if list.parts.count > 1 {
                 Picker("List", selection: $options.part) {
                     ForEach(Array(list.parts.enumerated()), id: \.offset) { Text($1).tag($0) }
