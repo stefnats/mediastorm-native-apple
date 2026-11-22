@@ -95,7 +95,23 @@ jobs:
             -derivedDataPath .build/derived-data \
             -resultBundlePath artifacts/SourceActions.xcresult \
             -only-testing:StrmrTVTests \
-            CODE_SIGNING_ALLOWED=NO 2>&1 | tee artifacts/tvos-xctest.log
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- 2>&1 | tee artifacts/tvos-xctest.log
+      - name: Record actual tvOS test-host signing
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          codesign -d --verbose=4 .build/derived-data/Build/Products/Debug-appletvsimulator/StrmrTV.app 2> artifacts/tvos-codesign.txt
+          python3 - <<'PYCODE'
+          import json,pathlib,plistlib
+          signature=pathlib.Path('artifacts/tvos-codesign.txt').read_text()
+          assert 'Signature=adhoc' in signature, 'Expected a locally signed simulator test host'
+          root=pathlib.Path('.build/derived-data/Build/Intermediates.noindex')
+          records=[]
+          for path in sorted(root.rglob('*.xcent')):
+              records.append({'path':str(path),'entitlements':plistlib.loads(path.read_bytes())})
+          pathlib.Path('artifacts/tvos-generated-entitlements.json').write_text(json.dumps(records,indent=2)+'\n')
+          assert records, 'Expected actual generated simulator entitlement records'
+          PYCODE
       - name: Preserve tvOS diagnostics before the iOS build
         if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0, Node 24
@@ -112,18 +128,19 @@ jobs:
           export TMPDIR="$GITHUB_WORKSPACE/.build/temporary"
           xcodebuild -showBuildSettings -project StrmrTV.xcodeproj -scheme StrmrMobile \
             -destination "$(cat artifacts/ios-unit-destination.txt)" \
-            ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO -json > artifacts/ios-build-settings.json
+            ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- -json > artifacts/ios-build-settings.json
           python3 - <<'PYCODE'
           import json,pathlib
           targets=json.loads(pathlib.Path('artifacts/ios-build-settings.json').read_text())
           settings=[item['buildSettings'] for item in targets if item.get('target') == 'StrmrMobile']
           assert len(settings) == 1, 'Expected exactly one actual iOS application target'
           assert settings[0]['ARCHS'].split() == ['arm64'], 'The inherited Iroh simulator framework requires arm64'
+          assert settings[0]['CODE_SIGNING_ALLOWED'] == 'YES' and settings[0]['CODE_SIGN_IDENTITY'] == '-', 'Simulator tests require local ad-hoc signing'
           PYCODE
           xcodebuild build -project StrmrTV.xcodeproj -scheme StrmrMobile \
             -destination "$(cat artifacts/ios-unit-destination.txt)" \
             -derivedDataPath .build/derived-data \
-            ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO 2>&1 | tee artifacts/ios-build.log
+            ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- 2>&1 | tee artifacts/ios-build.log
       - name: Run hosted iPhone shared unit suite
         if: ${{ !cancelled() && steps.prepare.outcome == 'success' && steps.ios_build.outcome == 'success' }}
         run: |
@@ -134,7 +151,7 @@ jobs:
             -derivedDataPath .build/derived-data \
             -resultBundlePath artifacts/LiveAdmission-iOS.xcresult \
             -only-testing:StrmrMobileTests -parallel-testing-enabled NO \
-            ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO 2>&1 | tee artifacts/ios-unit-xctest.log
+            ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- 2>&1 | tee artifacts/ios-unit-xctest.log
       - name: Preserve actual logs and XCTest results
         if: always()
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0, Node 24

@@ -49,6 +49,13 @@ application build settings are retained and required to select arm64. The inheri
 IrohBridge framework provides an arm64 simulator slice, matching this arm64
 runner; this job does not claim Intel simulator compatibility. It preserves
 logs and the xcresult.
+Simulator builds use local ad-hoc signing (`CODE_SIGN_IDENTITY=-`) and the
+existing entitlement files. The actual tvOS host signature and generated
+entitlements are retained. Unsigned hosts returned missing-entitlement errors
+in the original real Keychain tests; those tests and the product Keychain
+behavior remain unchanged. Local simulator signing needs no distribution
+certificate or real-device provisioning, as explained by
+[Apple DTS](https://developer.apple.com/forums/thread/826882).
 It does not publish apps, install on real devices, create releases or push source.
 After successful environment preparation, the iOS build also runs when tvOS
 fails, so one platform cannot hide the other platform's compiler findings.
