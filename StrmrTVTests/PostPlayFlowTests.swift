@@ -61,7 +61,7 @@ final class PostPlayFixtureAPI: PostPlayAPI {
 
 @MainActor
 final class PostPlayFlowTests: XCTestCase {
-    func until(_ predicate: () -> Bool) async { for _ in 0..<1000 where !predicate() { await Task.yield() } }
+    func until(_ predicate: () -> Bool) async { for _ in 0..<1000 { if !predicate() { await Task.yield() } } }
     func ready(_ api: PostPlayFixtureAPI) async throws -> PostPlayModel {
         let model = PostPlayModel(offer: try PostPlayFixture.offer(), api: api)
         model.load(); await until { !model.loading }; return model

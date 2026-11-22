@@ -5,7 +5,7 @@ import XCTest
 @MainActor
 final class PostPlayNavigationOwnershipTests: XCTestCase {
     private func until(_ predicate: () -> Bool) async {
-        for _ in 0..<1000 where !predicate() { await Task.yield() }
+        for _ in 0..<1000 { if !predicate() { await Task.yield() } }
         XCTAssertTrue(predicate(), "The actual controlled operation must reach its held boundary")
     }
     private func ready(_ api: PostPlayFixtureAPI) async throws -> PostPlayModel {

@@ -33,7 +33,7 @@ final class ReleaseReplacementOwnershipTests: XCTestCase {
     }
 
     private func until(_ predicate: () -> Bool) async {
-        for _ in 0..<1000 where !predicate() { await Task.yield() }
+        for _ in 0..<1000 { if !predicate() { await Task.yield() } }
     }
 
     func testLateDialogACannotDeleteDeduplicatedReplacementAlreadyOwnedByPlayerB() async throws {

@@ -20,7 +20,7 @@ final class PostPlayProgressFixture: PlayerProgressAPI {
 
 @MainActor
 final class PostPlayCompletionTests: XCTestCase {
-    func until(_ predicate: () -> Bool) async { for _ in 0..<1000 where !predicate() { await Task.yield() } }
+    func until(_ predicate: () -> Bool) async { for _ in 0..<1000 { if !predicate() { await Task.yield() } } }
     private var body: [String: Any] { ["mediaType": "movie", "playbackEnded": true, "position": 120, "duration": 120] }
     func testActualWriterSealsSynchronouslyThenDrainsOldWriteBeforeFinalCanonicalAck() async throws {
         let api = PostPlayProgressFixture(), writer = PlayerProgressWriter(viewer: api.context, api: api)

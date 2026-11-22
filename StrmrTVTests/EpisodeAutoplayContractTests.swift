@@ -35,7 +35,7 @@ final class EpisodeFixtureAPI: EpisodeAutoplayAPI {
 
 @MainActor
 enum EpisodeFixture {
-    static func settle(_ predicate: () -> Bool) async { for _ in 0..<1000 where !predicate() { await Task.yield() } }
+    static func settle(_ predicate: () -> Bool) async { for _ in 0..<1000 { if !predicate() { await Task.yield() } } }
     static func data(_ raw: Any) throws -> Data { try JSONSerialization.data(withJSONObject: raw) }
     static func next() throws -> PlaybackRequest {
         let original = try PostPlayFixture.request(series: true, episodes: [PostPlayFixture.episode(1), PostPlayFixture.episode(2), PostPlayFixture.episode(3)])
