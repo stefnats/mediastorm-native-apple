@@ -180,6 +180,9 @@ targets:
     sources:
       - path: StrmrTVTests/LiveAdmissionIntegrationTests.swift
       - path: StrmrTVTests/WatchRoomPlaybackTests.swift
+      - path: StrmrTVTests/SourceHintContractTests.swift
+      - path: StrmrTVTests/SourceHintPresentationTests.swift
+      - path: StrmrTVTests/VisibleSourceHintsTests.swift
     dependencies:
       - target: StrmrMobile
     settings:

@@ -15,12 +15,22 @@ struct MobileCardLink<Label: View>: View {
     var preview: AnyView?
     /// The preview's corners, the face's own, so its platter doesn't round them further.
     var previewCornerRadius: CGFloat = MobileCardMetrics.cornerRadius
+    var sourceHintNavigation = false
+    @Environment(\.mobilePush) private var push
+    @Environment(\.sourceHintOwner) private var sourceHints
     @ViewBuilder let label: Label
 
     var body: some View {
         switch card.link {
         case let .details(target):
-            let link = NavigationLink(value: target) { label }
+            let link = Group {
+                if sourceHintNavigation {
+                    Button {
+                        let hint = sourceHints.map{$0.value(SourceHintAdapters.title(card),annotation:card.sourceAvailability)} ?? card.sourceAvailability
+                        push(SourceHintNavigation.target(target,hint:hint))
+                    } label: { label }
+                } else { NavigationLink(value: target) { label } }
+            }
                 .buttonStyle(.plain)
                 .accessibilityLabel("\(card.title), \(card.subtitle)")
             if let preview {

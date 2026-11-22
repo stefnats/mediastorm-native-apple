@@ -42,6 +42,7 @@ struct MobileCard: View {
             }
         }
         .frame(width: size.width, alignment: .leading)
+        .sourceHintVisible(SourceHintAdapters.title(card))
     }
 }
 
@@ -71,6 +72,7 @@ struct MobileGridCard: View {
                 }
             }
         }
+        .sourceHintVisible(SourceHintAdapters.title(card))
     }
 }
 
@@ -86,6 +88,8 @@ struct MobileCardArt: View {
     var body: some View {
         face
             .frame(width: size.width, height: size.height)
+            .sourceHintDimming(card.sourceAvailability,coordinate:SourceHintAdapters.title(card))
+            .overlay(alignment:.topTrailing) { SourceHintBadge(value:card.sourceAvailability,coordinate:SourceHintAdapters.title(card)).padding(6) }
             .clipShape(RoundedRectangle(cornerRadius: MobileCardMetrics.cornerRadius, style: .continuous))
             .overlay(alignment: .topLeading) {
                 if card.symbol == nil, !card.logoTile {

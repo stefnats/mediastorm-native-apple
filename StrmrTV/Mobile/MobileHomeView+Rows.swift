@@ -18,6 +18,7 @@ struct MobileShelfRow: View {
                     if shelf.exploreFirst { explore }
                     ForEach(shelf.shown) { card in
                         MobileCard(card: card, landscape: landscape, onHide: onHide.map { hide in { hide(card) } })
+                            .environment(\.sourceHintOrdinal,shelf.shown.firstIndex(where:{$0.id == card.id}) ?? 0)
                     }
                     if !shelf.exploreFirst { explore }
                 }

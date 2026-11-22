@@ -25,6 +25,7 @@ struct HomeCarouselControls: View {
     @EnvironmentObject private var watchlist: WatchlistStore
     @Environment(\.openHomeDetails) private var openDetails
     @Environment(\.sidebarInset) private var sidebarInset
+    @Environment(\.sourceHintOwner) private var sourceHints
     @State private var watchlistBusy = false
 
     /// The controls' height: the buttons' unfocused height.
@@ -59,8 +60,13 @@ struct HomeCarouselControls: View {
     private var buttons: some View {
         HStack(spacing: 28) {
             Button { act("play", play) } label: {
-                Label((current?.progress ?? 0) > 0 ? String(localized: "Resume") : String(localized: "Play"),
-                      systemImage: "play.fill")
+                SourceHintValue(annotation:current?.sourceAvailability,coordinate:current.flatMap{SourceHintAdapters.title($0)}) { value in
+                TimelineView(.periodic(from:.now,by:1)) { tick in
+                    let missing = value?.presentation(at:tick.date).dimArtwork == true
+                    Label(missing ? String(localized:"Details") : ((current?.progress ?? 0) > 0 ? String(localized: "Resume") : String(localized: "Play")),
+                          systemImage: missing ? "info.circle" : "play.fill")
+                }
+                }
             }
             .focused(focused, equals: HomeCarousel.focus(.play))
             .overlay(alignment: .leading) {
@@ -127,14 +133,18 @@ struct HomeCarouselControls: View {
     /// As the details page's Play: opens the title's details, which start what Play there
     /// would (resume, or the next episode) once they load.
     private func play() {
-        guard let target = current?.target else { return }
+        guard let original = current?.target else { return }
+        let hint = sourceHints.map{$0.value(current.flatMap{SourceHintAdapters.title($0)},annotation:current?.sourceAvailability)} ?? current?.sourceAvailability
+        let target = SourceHintNavigation.target(original,hint:hint)
         HomeCarousel.log.info("play \(target.titleID) from \(shelf.id)")
-        DeepLinkRouter.shared.armAutoplay(target.titleID)
+        if SourceHintNavigation.autoplay(primary:true,target:target) { DeepLinkRouter.shared.armAutoplay(target.titleID) }
         openDetails(target)
     }
 
     private func openInfo() {
-        guard let target = current?.target else { return }
+        guard let original = current?.target else { return }
+        let hint = sourceHints.map{$0.value(current.flatMap{SourceHintAdapters.title($0)},annotation:current?.sourceAvailability)} ?? current?.sourceAvailability
+        let target = SourceHintNavigation.target(original,hint:hint)
         HomeCarousel.log.info("details \(target.titleID) from \(shelf.id)")
         openDetails(target)
     }

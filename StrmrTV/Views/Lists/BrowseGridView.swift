@@ -54,9 +54,11 @@ struct BrowseGridView: View {
                          onNearEnd: { Task { await loadPage() } }, nearEndRows: 6) { entry, width in
                     switch entry {
                     case let .title(title): PosterCard(title: title, width: width)
+                            .environment(\.sourceHintOrdinal,entries.firstIndex(where:{$0.id == entry.id}) ?? 0)
                     case let .item(item):
                         PosterCard(item: item, width: width,
                                    onRemoveFromList: removeAction(item))
+                            .environment(\.sourceHintOrdinal,entries.firstIndex(where:{$0.id == entry.id}) ?? 0)
                     case let .library(entry): LibraryPosterCard(entry: entry, width: width)
                     }
                 }
@@ -79,6 +81,7 @@ struct BrowseGridView: View {
             }
         }
         // Runs on appear and again from the first page whenever the sort or a filter changes.
+        .sourceHintScope()
         .task(id: ReloadKey(options: options, revision: store.revision)) { await reload() }
         // Titles added to or removed from this list (from any Add to List sheet): update in place.
         .onChange(of: customID.flatMap { store.itemRevisions[$0] }) { Task { await refreshInPlace() } }

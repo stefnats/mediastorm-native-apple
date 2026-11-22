@@ -62,6 +62,7 @@ struct HomeCard: Identifiable, Hashable {
     /// The server asks for the title and `subtitle` (shelf context such as a chart's
     /// country and week) over the art when the layout would otherwise hide them.
     var forceTitleOverlay = false
+    var sourceAvailability: SourceAvailability?
 
     var target: DetailsTarget? {
         if case let .details(target) = link { target } else { nil }
@@ -80,6 +81,7 @@ struct HomeCard: Identifiable, Hashable {
     }
 
     init(_ item: ContinueWatchingItem) {
+        sourceAvailability = item.sourceAvailability
         id = item.id
         link = .details(DetailsTarget(item))
         posterURL = item.textPosterUrl ?? item.posterUrl
@@ -134,6 +136,7 @@ struct HomeCard: Identifiable, Hashable {
     }
 
     init(_ item: WatchlistItem) {
+        sourceAvailability = item.sourceAvailability
         id = item.id
         link = .details(DetailsTarget(item))
         posterURL = item.textPosterUrl ?? item.posterUrl
@@ -151,6 +154,7 @@ struct HomeCard: Identifiable, Hashable {
 
     /// A list title; `rank` (Top 10) shows as the first badge.
     init(_ title: Title, rank: Int? = nil) {
+        sourceAvailability = title.sourceAvailability
         id = title.id
         link = .details(DetailsTarget(title))
         posterURL = title.textPoster?.url ?? title.poster?.url

@@ -176,7 +176,7 @@ extension DetailsView {
     /// A Top Shelf play link opened this page: run the primary action (Resume / Play
     /// next episode) once details have loaded.
     func autoplayIfRequested() {
-        guard title != nil, let primary = primaryTarget,
+        guard !target.suppressAutomaticSourcePreparation, title != nil, let primary = primaryTarget,
               DeepLinkRouter.shared.consumeAutoplay(target.titleID) else { return }
         play(episode: primary.episode, from: primary.start)
     }

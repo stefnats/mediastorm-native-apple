@@ -106,7 +106,7 @@ struct StoredMediaCatalogueView: View {
                     Text("\(model.total ?? 0) saved matches").font(.footnote).foregroundStyle(.secondary)
                     MobilePosterGrid(items: model.rows, onNearEnd: { model.loadMore() }) { row in
                         VStack {
-                            MobileGridCard(card: row.card)
+                            MobileGridCard(card: row.card).environment(\.sourceHintOrdinal,model.rows.firstIndex(where:{$0.id == row.id}) ?? 0)
                             if row.hidden != nil { Button("Unhide") { model.unhide(row) }.disabled(model.loading || !model.current) }
                         }
                     }
@@ -130,11 +130,13 @@ struct StoredMediaCatalogueView: View {
                         }
                         if row.hidden != nil { Button("Unhide") { model.unhide(row) }.disabled(model.loading || !model.current) }
                     }
+                    .environment(\.sourceHintOrdinal,model.rows.firstIndex(where:{$0.id == row.id}) ?? 0)
                 }
                 status
             }
 #endif
         }
+        .sourceHintScope(active:!controls)
         .sheet(isPresented: $controls) {
             NavigationStack {
                 StoredMediaFilterControls(list: model.list, capability: model.capability, options: $model.draft)

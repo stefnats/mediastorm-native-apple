@@ -76,6 +76,7 @@ struct ShelfRow: View, Equatable {
                                       poster: style != .landscape && !expanded, opens: style == .expandingPoster,
                                       text: cardText, info: expanded && expandedInfo,
                                       onHide: onHide.map { hide in { hide(card) } })
+                            .environment(\.sourceHintOrdinal,shelf.shown.firstIndex(where:{$0.id == card.id}) ?? 0)
                             .animation(moveAnimation, value: expanded)
                             .focused(focused, equals: HomeFocus(shelf: shelf.id, card: card.id))
                     }
