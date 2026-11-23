@@ -45,6 +45,37 @@ final class MobileDriverUITests: XCTestCase {
             app.launchArguments = (q["args"] ?? "").split(separator: " ").map(String.init)
             app.launch()
             return .json(["state": app.state.rawValue])
+        case "/state":
+            return .json(observedState())
+        case "/background":
+            guard app.state == .runningForeground else {
+                return .text("background requires an actually foreground app", status: 409)
+            }
+            let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            let shellState = springboard.state
+            guard shellState == .runningForeground || shellState == .runningBackground || shellState == .runningBackgroundSuspended else {
+                return .text("System Home must already be running; launch forbidden", status: 409)
+            }
+            springboard.activate()
+            guard issues.isEmpty else { return .text("System Home activation failed", status: 500) }
+            guard waitForBackgroundState() else {
+                return .text("app did not enter an actual background state", status: 504)
+            }
+            return .json(observedState())
+        case "/resume-backgrounded":
+            let beforeUptime = ProcessInfo.processInfo.systemUptime
+            let before = app.state
+            guard before == .runningBackground || before == .runningBackgroundSuspended else {
+                return .text("resume requires a still-running background app; cold launch forbidden", status: 409)
+            }
+            app.activate()
+            guard app.wait(for: .runningForeground, timeout: 5) else {
+                return .text("guarded activation did not foreground the original app", status: 504)
+            }
+            var result = observedState()
+            result["previousState"] = stateName(before)
+            result["previousSystemUptime"] = beforeUptime
+            return .json(result)
         case "/activate":
             app.activate()
             return .json(["state": app.state.rawValue])
@@ -90,12 +121,70 @@ final class MobileDriverUITests: XCTestCase {
             return .text("ok")
         case "/input":
             return input(q)
+        case "/switch":
+            return switchControl(q)
         case "/quit":
             serving = false
             return .text("bye")
         default:
             return .text("unknown endpoint \(request.path)", status: 404)
         }
+    }
+
+    /// Test-only public XCTest state witnesses; never relaunch, alter clocks or write defaults.
+    private func stateName(_ state: XCUIApplication.State) -> String {
+        switch state {
+        case .unknown: return "unknown"
+        case .notRunning: return "notRunning"
+        case .runningBackgroundSuspended: return "runningBackgroundSuspended"
+        case .runningBackground: return "runningBackground"
+        case .runningForeground: return "runningForeground"
+        @unknown default: return "unknownFutureState"
+        }
+    }
+
+    private func observedState() -> [String: Any] {
+        let state = app.state
+        return ["state": stateName(state), "rawState": state.rawValue,
+                "systemUptime": ProcessInfo.processInfo.systemUptime]
+    }
+
+    private func waitForBackgroundState() -> Bool {
+        let deadline = ProcessInfo.processInfo.systemUptime + 5
+        repeat {
+            let state = app.state
+            if state == .runningBackground || state == .runningBackgroundSuspended { return true }
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+        } while ProcessInfo.processInfo.systemUptime < deadline
+        return false
+    }
+
+    /// Act on the unique native switch inside its exact labelled SwiftUI owner.
+    private func switchControl(_ q: [String: String]) -> DriverServer.Response {
+        guard let label = q["label"], !label.isEmpty,
+              let expected = q["expected"], expected == "0" || expected == "1" else {
+            return .text("Exact switch label and expected binary value are required", status: 400)
+        }
+        let parents = app.switches.matching(NSPredicate(format: "label == %@", label))
+        let count = parents.count
+        guard count == 1 else { return .text("Expected one exact labelled switch", status: 409) }
+        let parent = parents.element(boundBy: 0)
+        guard parent.exists, parent.isHittable, (parent.value as? String) == expected else {
+            return .text("Labelled switch is not currently hittable at the expected value", status: 409)
+        }
+        let children = parent.switches
+        let targetCount = children.count
+        guard targetCount == 1 else { return .text("Expected one nested native switch", status: 409) }
+        let element = children.element(boundBy: 0)
+        guard element.exists, element.isHittable, (element.value as? String) == expected else {
+            return .text("Nested switch is not currently hittable at the expected value", status: 409)
+        }
+        let owner = describe(parent)
+        let target = describe(element)
+        element.tap()
+        guard issues.isEmpty else { return .text("Native switch tap failed", status: 500) }
+        return .json(["role": "Switch", "label": label, "count": count,
+                      "targetCount": targetCount, "parent": owner, "target": target, "action": "tap"])
     }
 
     private func input(_ q: [String: String]) -> DriverServer.Response {
