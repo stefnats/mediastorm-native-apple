@@ -184,7 +184,7 @@ def main():
     scripts = source / 'TestSupport/apple-ui-smoke/profile'
     for name, digest in PINS.items():
         assert hashlib.sha256((scripts / name).read_bytes()).hexdigest() == digest
-    assert hashlib.sha256((source / 'StrmrMobileUITests/MobileDriverUITests.swift').read_bytes()).hexdigest() == '9372792eb54fa3995b512e6066fd91290d817c36ed3829d219119df11947e886', 'Test-only public-state instrumentation changed'
+    assert hashlib.sha256((source / 'StrmrMobileUITests/MobileDriverUITests.swift').read_bytes()).hexdigest() == 'b15329e5ae17a798084db17f1f2fee8f8cd618c9a24b8e180c7955997c8b4ee5', 'Test-only public-state instrumentation changed'
     output = args.output
     output.mkdir(mode=0o700)
     temporary = source / 'build/apple-ui-smoke/temporary'

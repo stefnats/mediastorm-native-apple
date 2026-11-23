@@ -299,6 +299,7 @@ final class MobileDriverUITests: XCTestCase {
             "type": "\(element.elementType.rawValue)",
             "hittable": element.isHittable,
             "frame": [Int(f.minX), Int(f.minY), Int(f.width), Int(f.height)],
+            "preciseFrame": [Double(f.minX), Double(f.minY), Double(f.width), Double(f.height)],
             "value": (element.value as? String) ?? "",
         ]
     }
