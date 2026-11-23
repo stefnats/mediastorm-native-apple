@@ -20,7 +20,6 @@ import traceback
 BASE = '9e70ae1a023190c91463e085f480deedbe697254'
 UNIT_WORKFLOW_SHA256 = 'b5669572390f72c117badafa7f6022e6e59e7bd01d051f2fc6b2bcaeef5d0e73'
 LEAVES = {
-    '.github/workflows/apple-iphone-ui-smoke.yml',
     '.github/workflows/apple-ui-smoke.yml',
     'StrmrMobileUITests/MobileDriverUITests.swift',
     'TestSupport/apple-ui-smoke/basic/driver.py',

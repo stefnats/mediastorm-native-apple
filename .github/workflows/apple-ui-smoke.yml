@@ -1,4 +1,4 @@
-# Manual UI workflow; preserve the separate original source-action unit workflow.
+# Manual UI suites; preserve the separate original source-action unit workflow.
 name: Apple reusable synthetic UI smoke
 
 on:
@@ -9,9 +9,9 @@ on:
         type: choice
         required: true
         default: tvos
-        options: [tvos]
+        options: [tvos, basic, profile, media]
       source_ref:
-        description: Exact reviewed 40-character smoke-branch commit
+        description: Exact reviewed 40-character suite-branch commit
         required: true
         type: string
 
@@ -19,43 +19,68 @@ permissions:
   contents: read
 
 concurrency:
-  group: apple-ui-smoke-tvos
+  group: apple-ui-smoke-${{ inputs.suite }}
   cancel-in-progress: false
 
 jobs:
-  tvos-ui-smoke:
-    if: ${{ github.repository == 'stefnats/mediastorm-native-apple' && github.event.repository.private == false && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || github.ref == 'refs/heads/test/apple-ui-suite') && inputs.suite == 'tvos' }}
+  ui-smoke:
+    if: ${{ github.repository == 'stefnats/mediastorm-native-apple' && github.event.repository.private == false && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || github.ref == 'refs/heads/test/apple-ui-suite') }}
     runs-on: xcode-27
     timeout-minutes: 60
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.app/Contents/Developer
       SOURCE_REF: ${{ inputs.source_ref }}
+      SUITE: ${{ inputs.suite }}
       PYTHONDONTWRITEBYTECODE: '1'
     defaults:
       run:
         shell: bash
     steps:
-      - name: Require the reviewed immutable branch head
+      - name: Require the reviewed immutable head and select one literal suite
+        id: route
         run: |
           set -euo pipefail
           [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]
           [[ "$SOURCE_REF" == "$GITHUB_SHA" ]]
+          case "$SUITE" in
+            tvos)
+              runner=TestSupport/apple-ui-smoke/tvos/run-ci.py
+              suite_output=tvos-ui-smoke
+              ;;
+            basic)
+              runner=TestSupport/apple-ui-smoke/basic/run-ci.py
+              suite_output=iphone-basic-ui-smoke
+              ;;
+            profile)
+              runner=TestSupport/apple-ui-smoke/profile/run-ci.py
+              suite_output=iphone-profile-ui-smoke
+              ;;
+            media)
+              runner=TestSupport/apple-ui-smoke/media/run-ci.py
+              suite_output=iphone-media-ui-smoke
+              ;;
+            *) exit 1 ;;
+          esac
+          printf 'runner=%s\nsuite_output=%s\n' "$runner" "$suite_output" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           ref: ${{ inputs.source_ref }}
           fetch-depth: 2
           persist-credentials: false
-      - name: Run the actual original tvOS remote driver against the synthetic fixture
+      - name: Run the selected original UI driver and synthetic controller
+        env:
+          RUNNER_PATH: ${{ steps.route.outputs.runner }}
+          SUITE_OUTPUT: ${{ steps.route.outputs.suite_output }}
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          python3 TestSupport/apple-ui-smoke/tvos/run-ci.py --output "$GITHUB_WORKSPACE/artifacts/tvos-ui-smoke"
+          python3 "$RUNNER_PATH" --output "$GITHUB_WORKSPACE/artifacts/$SUITE_OUTPUT"
       - name: Preserve actual UI, process and XCTest evidence
-        if: always()
+        if: ${{ always() && steps.route.outcome == 'success' }}
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
         with:
-          name: apple-tvos-ui-smoke-${{ inputs.source_ref }}
-          path: artifacts/tvos-ui-smoke/
+          name: apple-${{ steps.route.outputs.suite_output }}-${{ inputs.source_ref }}
+          path: artifacts/${{ steps.route.outputs.suite_output }}/
           if-no-files-found: error
           retention-days: 1
           compression-level: 9
