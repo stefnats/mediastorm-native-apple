@@ -83,6 +83,66 @@ class Job:
 
 
 
+def generated_ui_plan(products):
+    """Select one original generated mobile UI plan without rewriting or exporting its environment."""
+    products = products.resolve(strict=True)
+    matches = []
+    for plan in sorted(products.glob('*.xctestrun')):
+        raw = plan.read_bytes()
+        data = plistlib.loads(raw)
+        assert isinstance(data, dict), 'Generated test plan is not a dictionary'
+        if 'TestConfigurations' in data:
+            configurations = data['TestConfigurations']
+            assert isinstance(configurations, list), 'Invalid generated test configurations'
+            targets = []
+            for configuration in configurations:
+                assert isinstance(configuration, dict), 'Invalid generated test configuration'
+                rows = configuration.get('TestTargets', [])
+                assert isinstance(rows, list), 'Invalid generated test targets'
+                targets += [(None, target) for target in rows]
+            schema = 'TestConfigurations/TestTargets'
+        else:
+            targets = [(key, value) for key, value in data.items() if not key.startswith('__') and isinstance(value, dict)]
+            schema = 'legacy-target-dictionary'
+        selected = []
+        for legacy_name, target in targets:
+            assert isinstance(target, dict), 'Invalid generated target dictionary'
+            if target.get('BlueprintName', legacy_name) != 'StrmrMobileUITests':
+                continue
+            assert target.get('IsUITestBundle') is True, 'Expected the original mobile UI-test bundle'
+
+            def expand(value, host=None):
+                assert isinstance(value, str) and value, 'Missing generated test path'
+                value = value.replace('__TESTROOT__', str(products))
+                if host is not None:
+                    value = value.replace('__TESTHOST__', str(host))
+                assert '__' not in value, 'Unsupported unresolved generated path macro'
+                result = Path(value)
+                assert result.is_absolute(), 'Expected resolved absolute generated test path'
+                result = result.resolve(strict=True)
+                assert result.is_relative_to(products), 'Generated test path outside original Build/Products'
+                return result
+
+            host = expand(target.get('TestHostPath'))
+            host_apps = [path for path in (host, *host.parents) if path.suffix == '.app']
+            assert host_apps and host_apps[0].name == 'StrmrMobileUITests-Runner.app', 'Unexpected original UI runner host'
+            host_app = host_apps[0]
+            bundle = expand(target.get('TestBundlePath'), host_app)
+            app = expand(target.get('UITargetAppPath'), host_app)
+            assert bundle.is_dir() and bundle.name == 'StrmrMobileUITests.xctest', 'Wrong or missing original mobile UI bundle'
+            assert app.is_dir() and app.name == 'StrmrMobile.app', 'Wrong or missing original mobile target application'
+            selected.append({'schema': schema, 'target': 'StrmrMobileUITests',
+                             'testBundlePath': str(bundle), 'testHostPath': str(host), 'uiTargetAppPath': str(app)})
+        if selected:
+            assert len(selected) == 1, 'Ambiguous original mobile UI target configurations'
+            metadata = selected[0]
+            metadata.update({'planPath': str(plan), 'planSHA256': hashlib.sha256(raw).hexdigest(),
+                             'planBytes': len(raw), 'originalPlanUnmodified': True})
+            matches.append((plan, metadata))
+    assert len(matches) == 1, 'Expected exactly one matching original generated mobile UI plan'
+    return matches[0]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
@@ -106,11 +166,11 @@ def main():
         assert hashlib.sha256((scripts / name).read_bytes()).hexdigest() == digest
     output = args.output
     output.mkdir(mode=0o700)
-    temporary = source / '.build/apple-ui-smoke/temporary'
+    temporary = source / 'build/apple-ui-smoke/temporary'
     temporary.mkdir(parents=True, exist_ok=True)
     homebrew_temporary = temporary / 'homebrew'
     homebrew_temporary.mkdir(exist_ok=True)
-    derived = source / '.build/apple-ui-smoke/derived'
+    derived = source / 'build/apple-ui-smoke/derived'
     env = dict(os.environ, TMPDIR=str(temporary) + '/', TMP=str(temporary) + '/',
                TEMP=str(temporary) + '/', PYTHONDONTWRITEBYTECODE='1',
                HOMEBREW_TEMP=str(homebrew_temporary), HOMEBREW_NO_AUTO_UPDATE='1',
@@ -123,6 +183,7 @@ def main():
     simulator = None
     simulator_boot_started = False
     driver_ready = False
+    test_plan = None
 
     def stage(name):
         event = {'phase': name, 'atUTC': datetime.now(timezone.utc).isoformat()}
@@ -167,7 +228,7 @@ def main():
         (output / (phase + '-generated-project.patch')).write_bytes(git('diff', '--binary', 'HEAD', '--', 'StrmrTV.xcodeproj'))
         paths = git('diff', '--name-only', '--no-renames', '-z', 'HEAD').split(b'\0')
         paths += git('ls-files', '--others', '--exclude-standard', '-z').split(b'\0')
-        assert all(not p or p.startswith((b'StrmrTV.xcodeproj/', b'artifacts/', b'.build/')) for p in paths), 'Unexpected source mutation'
+        assert all(not p or p.startswith((b'StrmrTV.xcodeproj/', b'artifacts/', b'build/')) for p in paths), 'Unexpected source mutation'
         assert git('rev-parse', 'HEAD').decode().strip() == expected
         stage(phase + ':source-check:exact')
 
@@ -195,6 +256,9 @@ def main():
         assert int(re.search(r'Xcode (\d+)', tools['xcode'])[1]) >= 27
         assert tuple(map(int, re.search(r'Swift version (\d+)\.(\d+)', tools['swift']).groups())) >= (6, 4)
         state['actualTools'] = tools
+        help_text = command('xcodebuild-help', ['xcodebuild', '-help'])
+        assert '-xctestrun' in help_text, 'Installed xcodebuild does not advertise -xctestrun'
+        state['installedXctestrunFlagSupported'] = True
         command('xcodegen-generate', ['xcodegen', 'generate'])
         source_check('after-generation')
         devices = json.loads(command('simulators', ['xcrun', 'simctl', 'list', 'devices', 'available', '--json'], structured=True))
@@ -216,6 +280,10 @@ def main():
         assert app[0]['CODE_SIGNING_ALLOWED'] == 'YES' and app[0]['CODE_SIGN_IDENTITY'] == '-'
         selected_test = '-only-testing:StrmrMobileUITests/MobileDriverUITests/testServe'
         command('build-for-testing', ['xcodebuild', 'build-for-testing', *common, selected_test], 2400)
+        test_plan, plan_metadata = generated_ui_plan(derived / 'Build/Products')
+        state['selectedOriginalTestPlan'] = plan_metadata
+        (output / 'selected-xctestrun-metadata.json').write_text(json.dumps(plan_metadata, indent=2) + '\n')
+        stage('original-generated-xctestrun:selected')
         command('ios-codesign', ['codesign', '-d', '--verbose=4', str(derived / 'Build/Products/Debug-iphonesimulator/StrmrMobile.app')])
         assert 'Signature=adhoc' in (output / 'ios-codesign.log').read_text()
         records = [{'path': str(p.relative_to(source)), 'entitlements': plistlib.loads(p.read_bytes())}
@@ -254,7 +322,8 @@ def main():
         command('simulator-ready', ['xcrun', 'simctl', 'bootstatus', simulator, '-b'], 180)
         resources('after-boot')
         driver_env = dict(env, TEST_RUNNER_STRMR_DRIVER='1', TEST_RUNNER_STRMR_DRIVER_PORT='7791')
-        driver = Job('xctest-ui-driver', ['xcodebuild', 'test-without-building', *common, selected_test,
+        driver = Job('xctest-ui-driver', ['xcodebuild', 'test-without-building', '-xctestrun', str(test_plan),
+                                        '-destination', 'id=' + simulator, '-parallel-testing-enabled', 'NO', selected_test,
                                         '-resultBundlePath', str(output / 'iPhone-UI.xcresult')], output, driver_env)
         deadline = time.monotonic() + 180
         while True:
@@ -309,6 +378,11 @@ def main():
                 command('simulator-shutdown', ['xcrun', 'simctl', 'shutdown', simulator], 120)
             except BaseException as error:
                 state['lifecycleErrors'].append('Simulator shutdown: ' + str(error))
+        if test_plan is not None:
+            try:
+                assert hashlib.sha256(test_plan.read_bytes()).hexdigest() == state['selectedOriginalTestPlan']['planSHA256'], 'Original generated test plan changed'
+            except (AssertionError, OSError) as error:
+                state['errors'].append('Original test-plan preservation: ' + str(error))
         try:
             source_check('after-cleanup')
         except BaseException as error:
