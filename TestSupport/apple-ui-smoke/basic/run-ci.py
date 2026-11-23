@@ -40,7 +40,7 @@ LEAVES = {
     'TestSupport/apple-ui-smoke/tvos/run-ci.py',
 }
 PINS = {'fixture.py': 'b6f4ef1e919f80e7ba0a3a0ad71f8b593a074935ec7159c95a29b02553edaa0b',
-        'driver.py': '9008fbee0d90f1bc1b9b9fd3a96dc0114f49e3bfbfd4d774f5bd925cad534878'}
+        'driver.py': '32dde95661f8c7f7971afa9afc4aa6240479dbd6841b2cf93d743e3ec900961f'}
 
 
 class Job:

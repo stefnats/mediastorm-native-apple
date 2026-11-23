@@ -91,7 +91,7 @@ def main():
     button_type = None
 
     def call(endpoint, query=None):
-        connection = http.client.HTTPConnection('127.0.0.1', args.driver_port, timeout=25)
+        connection = http.client.HTTPConnection('127.0.0.1', args.driver_port, timeout=90 if endpoint == '/launch' else 25)
         try:
             target = endpoint + ('?' + urlencode(query) if query else '')
             connection.request('GET', target)
