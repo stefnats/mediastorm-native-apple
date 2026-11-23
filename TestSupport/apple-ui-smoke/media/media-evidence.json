@@ -1,0 +1,34 @@
+{
+  "mediaSHA256": "cb5e2eb01783cacbaa09495cd5c280791ee53540257b94a5cabfe30bc651561a",
+  "mediaBytes": 986689,
+  "duration": 60.0,
+  "faststartAtoms": {
+    "ftyp": 0,
+    "moov": 32,
+    "free": 24364,
+    "mdat": 24372
+  },
+  "ffprobe": {
+    "format": {
+      "duration": "60.000000"
+    },
+    "streams": [
+      {
+        "index": 0,
+        "codec_type": "video",
+        "codec_name": "h264",
+        "width": 160,
+        "height": 90,
+        "pix_fmt": "yuv420p",
+        "r_frame_rate": "10/1"
+      },
+      {
+        "index": 1,
+        "codec_type": "audio",
+        "codec_name": "aac",
+        "sample_rate": "48000",
+        "channels": 1
+      }
+    ]
+  }
+}
