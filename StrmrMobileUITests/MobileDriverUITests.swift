@@ -210,8 +210,9 @@ final class MobileDriverUITests: XCTestCase {
     }
 
     private func find(_ text: String, limit: Int) -> DriverServer.Response {
-        let matches = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS[c] %@ OR identifier CONTAINS[c] %@", text, text))
+        let elements = app.descendants(matching: .any)
+        let matches = text.isEmpty ? elements : elements.matching(
+            NSPredicate(format: "label CONTAINS[c] %@ OR identifier CONTAINS[c] %@", text, text))
         let count = matches.count
         let items = (0..<min(count, limit)).map { describe(matches.element(boundBy: $0)) }
         return .json(["count": count, "items": items])
