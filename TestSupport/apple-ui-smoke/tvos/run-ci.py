@@ -19,8 +19,26 @@ import traceback
 
 BASE = '9e70ae1a023190c91463e085f480deedbe697254'
 UNIT_WORKFLOW_SHA256 = 'b5669572390f72c117badafa7f6022e6e59e7bd01d051f2fc6b2bcaeef5d0e73'
-LEAVES = {'.github/workflows/apple-ui-smoke.yml', 'TestSupport/apple-ui-smoke/tvos/fixture.py',
-          'TestSupport/apple-ui-smoke/tvos/driver.py', 'TestSupport/apple-ui-smoke/tvos/run-ci.py'}
+LEAVES = {
+    '.github/workflows/apple-iphone-ui-smoke.yml',
+    '.github/workflows/apple-ui-smoke.yml',
+    'StrmrMobileUITests/MobileDriverUITests.swift',
+    'TestSupport/apple-ui-smoke/basic/driver.py',
+    'TestSupport/apple-ui-smoke/basic/fixture.py',
+    'TestSupport/apple-ui-smoke/basic/run-ci.py',
+    'TestSupport/apple-ui-smoke/media/driver.py',
+    'TestSupport/apple-ui-smoke/media/fixture.py',
+    'TestSupport/apple-ui-smoke/media/generate_media.py',
+    'TestSupport/apple-ui-smoke/media/media/media-evidence.json',
+    'TestSupport/apple-ui-smoke/media/media/ui-smoke.mp4',
+    'TestSupport/apple-ui-smoke/media/run-ci.py',
+    'TestSupport/apple-ui-smoke/profile/driver.py',
+    'TestSupport/apple-ui-smoke/profile/fixture.py',
+    'TestSupport/apple-ui-smoke/profile/run-ci.py',
+    'TestSupport/apple-ui-smoke/tvos/driver.py',
+    'TestSupport/apple-ui-smoke/tvos/fixture.py',
+    'TestSupport/apple-ui-smoke/tvos/run-ci.py',
+}
 PINS = {'fixture.py': 'b6f4ef1e919f80e7ba0a3a0ad71f8b593a074935ec7159c95a29b02553edaa0b',
         'driver.py': '240209ed7f922511d8c7cfc98cea6ade5e544353fc2538c73b5f4c32275ddc62'}
 

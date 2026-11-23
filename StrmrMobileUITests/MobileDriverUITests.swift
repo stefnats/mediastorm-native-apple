@@ -45,6 +45,31 @@ final class MobileDriverUITests: XCTestCase {
             app.launchArguments = (q["args"] ?? "").split(separator: " ").map(String.init)
             app.launch()
             return .json(["state": app.state.rawValue])
+        case "/state":
+            return .json(observedState())
+        case "/background":
+            guard app.state == .runningForeground else {
+                return .text("background requires an actually foreground app", status: 409)
+            }
+            XCUIDevice.shared.press(.home)
+            guard waitForBackgroundState() else {
+                return .text("app did not enter an actual background state", status: 504)
+            }
+            return .json(observedState())
+        case "/resume-backgrounded":
+            let beforeUptime = ProcessInfo.processInfo.systemUptime
+            let before = app.state
+            guard before == .runningBackground || before == .runningBackgroundSuspended else {
+                return .text("resume requires a still-running background app; cold launch forbidden", status: 409)
+            }
+            app.activate()
+            guard app.wait(for: .runningForeground, timeout: 5) else {
+                return .text("guarded activation did not foreground the original app", status: 504)
+            }
+            var result = observedState()
+            result["previousState"] = stateName(before)
+            result["previousSystemUptime"] = beforeUptime
+            return .json(result)
         case "/activate":
             app.activate()
             return .json(["state": app.state.rawValue])
@@ -78,7 +103,7 @@ final class MobileDriverUITests: XCTestCase {
         case "/tree":
             return .text(app.debugDescription)
         case "/find":
-            return find(q["q"] ?? "", limit: Int(q["limit"] ?? "") ?? 25)
+            return find(q["q"] ?? "", limit: Int(q["limit"] ?? "") ?? 25, role: q["role"])
         case "/wait":
             let target = q["q"] ?? ""
             let element = match(target)
@@ -88,12 +113,70 @@ final class MobileDriverUITests: XCTestCase {
             if let target = q["q"], !target.isEmpty { match(target).tap() }
             app.typeText(q["text"] ?? "")
             return .text("ok")
+        case "/input":
+            return input(q)
         case "/quit":
             serving = false
             return .text("bye")
         default:
             return .text("unknown endpoint \(request.path)", status: 404)
         }
+    }
+
+    /// Test-only public XCTest state witnesses; never relaunch, alter clocks or write defaults.
+    private func stateName(_ state: XCUIApplication.State) -> String {
+        switch state {
+        case .unknown: return "unknown"
+        case .notRunning: return "notRunning"
+        case .runningBackgroundSuspended: return "runningBackgroundSuspended"
+        case .runningBackground: return "runningBackground"
+        case .runningForeground: return "runningForeground"
+        @unknown default: return "unknownFutureState"
+        }
+    }
+
+    private func observedState() -> [String: Any] {
+        let state = app.state
+        return ["state": stateName(state), "rawState": state.rawValue,
+                "systemUptime": ProcessInfo.processInfo.systemUptime]
+    }
+
+    private func waitForBackgroundState() -> Bool {
+        let deadline = ProcessInfo.processInfo.systemUptime + 5
+        repeat {
+            let state = app.state
+            if state == .runningBackground || state == .runningBackgroundSuspended { return true }
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+        } while ProcessInfo.processInfo.systemUptime < deadline
+        return false
+    }
+
+    private func input(_ q: [String: String]) -> DriverServer.Response {
+        guard let role = q["role"], let field = q["field"], !field.isEmpty,
+              let text = q["text"] else {
+            return .text("Input role, nonempty field and text are required", status: 400)
+        }
+        let elements: XCUIElementQuery
+        switch role {
+        case "TextField": elements = app.descendants(matching: .textField)
+        case "SecureTextField": elements = app.descendants(matching: .secureTextField)
+        default: return .text("Unsupported input role", status: 400)
+        }
+        let matches = elements.matching(NSPredicate(
+            format: "placeholderValue == %@ OR label == %@ OR identifier == %@", field, field, field))
+        let count = matches.count
+        guard count == 1 else { return .text("Expected one exact input field", status: 409) }
+        let element = matches.element(boundBy: 0)
+        guard element.exists, element.isHittable else {
+            return .text("Input field is not actually hittable", status: 409)
+        }
+        element.tap()
+        guard issues.isEmpty else { return .text("Native input tap failed", status: 500) }
+        element.typeText(text)
+        guard issues.isEmpty else { return .text("Native input typing failed", status: 500) }
+        var target = describe(element)
+        target.removeValue(forKey: "value")
+        return .json(["role": role, "field": field, "count": count, "target": target])
     }
 
     /// The first element labelled or identified `text` exactly, else one containing it.
@@ -156,12 +239,20 @@ final class MobileDriverUITests: XCTestCase {
         return .text("not found after \(max) swipes: \(text)", status: 404)
     }
 
-    private func find(_ text: String, limit: Int) -> DriverServer.Response {
-        let matches = app.descendants(matching: .any)
+    private func find(_ text: String, limit: Int, role: String? = nil) -> DriverServer.Response {
+        let elements: XCUIElementQuery
+        switch role {
+        case .none: elements = app.descendants(matching: .any)
+        case .some("TextField"): elements = app.descendants(matching: .textField)
+        case .some("SecureTextField"): elements = app.descendants(matching: .secureTextField)
+        case .some("Button"): elements = app.descendants(matching: .button)
+        default: return .text("Unsupported element role", status: 400)
+        }
+        let matches = text.isEmpty ? elements : elements
             .matching(NSPredicate(format: "label CONTAINS[c] %@ OR identifier CONTAINS[c] %@", text, text))
         let count = matches.count
         let items = (0..<min(count, limit)).map { describe(matches.element(boundBy: $0)) }
-        return .json(["count": count, "items": items])
+        return .json(["count": count, "items": items, "role": role ?? "Any"])
     }
 
     private func describe(_ element: XCUIElement) -> [String: Any] {
