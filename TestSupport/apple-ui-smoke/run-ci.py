@@ -22,7 +22,7 @@ LEAVES = {'.github/workflows/apple-source-actions.yml', 'TestSupport/apple-ui-sm
           'TestSupport/apple-ui-smoke/driver.py', 'TestSupport/apple-ui-smoke/run-ci.py',
           'StrmrMobileUITests/MobileDriverUITests.swift'}
 PINS = {'fixture.py': 'b6f4ef1e919f80e7ba0a3a0ad71f8b593a074935ec7159c95a29b02553edaa0b',
-        'driver.py': '56ab341980d3259a30c51a8931bdfddd11b0102cad1654084421be663dcc6ff4'}
+        'driver.py': 'ab25ab1f0e247083794e239d78ecd46ccef097f8541d51845459dc0b5ce019c7'}
 
 
 class Job:
@@ -165,7 +165,7 @@ def main():
     scripts = source / 'TestSupport/apple-ui-smoke'
     for name, digest in PINS.items():
         assert hashlib.sha256((scripts / name).read_bytes()).hexdigest() == digest
-    assert hashlib.sha256((source / 'StrmrMobileUITests/MobileDriverUITests.swift').read_bytes()).hexdigest() == 'e024e32505ef64b90ccf9edbefb52ddc8a3c62b122d9cfd65eb69df1f0899e59', 'Test-only public-state instrumentation changed'
+    assert hashlib.sha256((source / 'StrmrMobileUITests/MobileDriverUITests.swift').read_bytes()).hexdigest() == 'fbad6829a8c40451f15c75c5ef89b29e36d42a013ab25b468ec49db54ed8ffbb', 'Test-only public-state instrumentation changed'
     output = args.output
     output.mkdir(mode=0o700)
     temporary = source / 'build/apple-ui-smoke/temporary'
