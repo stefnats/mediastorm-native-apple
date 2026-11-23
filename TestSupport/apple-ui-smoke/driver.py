@@ -19,6 +19,32 @@ MEDIA_SHA256 = 'cb5e2eb01783cacbaa09495cd5c280791ee53540257b94a5cabfe30bc651561a
 MEDIA_BYTES = 986689
 
 
+def precise_frame_matches(tokens, item):
+    """Correlate native coordinates with the decimal precision actually printed in the tree."""
+    if not isinstance(item, dict) or len(tokens) != 4:
+        return False
+    legacy, precise = item.get('frame'), item.get('preciseFrame')
+    if not isinstance(legacy, list) or len(legacy) != 4 or not isinstance(precise, list) or len(precise) != 4:
+        return False
+    for token, value, integer in zip(tokens, precise, legacy):
+        if not isinstance(token, str) or not re.fullmatch(r'-?\d+(?:\.\d+)?', token):
+            return False
+        if type(integer) is not int or isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+        try:
+            raw, printed = float(value), float(token)
+        except (OverflowError, ValueError):
+            return False
+        if not math.isfinite(raw) or not math.isfinite(printed) or int(raw) != integer:
+            return False
+        digits = len(token.partition('.')[2])
+        half_unit = 0.5 * 10.0 ** -digits
+        epsilon = 2 * max(math.ulp(raw), math.ulp(printed))
+        if abs(raw - printed) > half_unit + epsilon:
+            return False
+    return legacy[2] > 0 and legacy[3] > 0 and precise[2] > 0 and precise[3] > 0
+
+
 def observed_button(tree, inventory, labels, prefix=False):
     """Select one observed Button role and its current hittable inventory entry."""
     if not isinstance(tree, bytes) or not isinstance(inventory, dict) or not isinstance(inventory.get('items'), list):
@@ -42,11 +68,9 @@ def observed_button(tree, inventory, labels, prefix=False):
             continue
         if re.search(r'\bDisabled\b', match[5]):
             continue
-        frame = [int(float(match[i])) for i in range(1, 5)]
-        if frame[2] <= 0 or frame[3] <= 0:
-            continue
+        tokens = [match[i] for i in range(1, 5)]
         items = [item for item in inventory['items'] if isinstance(item, dict)
-                 and item.get('frame') == frame and item.get('label') == label
+                 and precise_frame_matches(tokens, item) and item.get('label') == label
                  and item.get('hittable') is True and isinstance(item.get('type'), str)]
         if len(items) == 1:
             candidates.append(items[0])
@@ -336,9 +360,29 @@ def main():
             connection.close()
 
     def current_button(labels, prefix=False):
-        tree = call('/tree')
-        inventory = call('/find', {'q': '', 'limit': '1000', 'role': 'Button'})
-        return observed_button(tree, inventory, labels, prefix), tree, inventory
+        selections = outcome.setdefault('buttonSelections', [])
+        record = {'labels': list(labels), 'prefix': prefix,
+                  'observedAtUTC': datetime.now(timezone.utc).isoformat()}
+        selections.append(record)
+        stem = 'button-selection-' + str(len(selections)).zfill(2)
+        try:
+            tree = call('/tree')
+            if not isinstance(tree, bytes):
+                raise RuntimeError('Expected actual button tree bytes')
+            tree_path = args.output / (stem + '-tree.txt')
+            tree_path.write_bytes(tree)
+            record['tree'] = {'path': tree_path.name, 'sha256': hashlib.sha256(tree).hexdigest()}
+            inventory = call('/find', {'q': '', 'limit': '1000', 'role': 'Button'})
+            inventory_path = args.output / (stem + '-inventory.json')
+            inventory_path.write_text(json.dumps(inventory, indent=2, allow_nan=False) + '\n')
+            record['inventory'] = {'path': inventory_path.name,
+                                   'sha256': hashlib.sha256(inventory_path.read_bytes()).hexdigest()}
+            selected = observed_button(tree, inventory, labels, prefix)
+            record['selected'] = selected
+            return selected, tree, inventory
+        except BaseException as error:
+            record['error'] = {'type': type(error).__name__, 'message': str(error)}
+            raise
 
     def save_playback_evidence(name, value):
         path = args.output / (name + '-fixture-evidence.json')
