@@ -51,7 +51,13 @@ final class MobileDriverUITests: XCTestCase {
             guard app.state == .runningForeground else {
                 return .text("background requires an actually foreground app", status: 409)
             }
-            XCUIDevice.shared.press(.home)
+            let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            let shellState = springboard.state
+            guard shellState == .runningForeground || shellState == .runningBackground || shellState == .runningBackgroundSuspended else {
+                return .text("System Home must already be running; launch forbidden", status: 409)
+            }
+            springboard.activate()
+            guard issues.isEmpty else { return .text("System Home activation failed", status: 500) }
             guard waitForBackgroundState() else {
                 return .text("app did not enter an actual background state", status: 504)
             }

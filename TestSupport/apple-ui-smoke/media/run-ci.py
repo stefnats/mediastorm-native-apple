@@ -181,7 +181,7 @@ def main():
     assert git('rev-parse', 'HEAD').decode().strip() == expected
     assert not git('status', '--porcelain'), 'Start from the clean exact checkout'
     assert hashlib.sha256((source / '.github/workflows/apple-source-actions.yml').read_bytes()).hexdigest() == UNIT_WORKFLOW_SHA256, 'Original unit workflow changed'
-    assert hashlib.sha256((source / 'StrmrMobileUITests/MobileDriverUITests.swift').read_bytes()).hexdigest() == 'b263be75f843e73302d8f7b9b36a741c65068cbd0092440a87d582745f343d37', 'Shared test-only mobile driver changed'
+    assert hashlib.sha256((source / 'StrmrMobileUITests/MobileDriverUITests.swift').read_bytes()).hexdigest() == '9372792eb54fa3995b512e6066fd91290d817c36ed3829d219119df11947e886', 'Shared test-only mobile driver changed'
     scripts = source / 'TestSupport/apple-ui-smoke/media'
     for name, digest in PINS.items():
         assert hashlib.sha256((scripts / name).read_bytes()).hexdigest() == digest
