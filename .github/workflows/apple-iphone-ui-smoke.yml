@@ -19,7 +19,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: apple-ui-smoke-iphone
+  group: apple-ui-smoke-iphone-${{ inputs.suite }}
   cancel-in-progress: false
 
 jobs:
