@@ -204,16 +204,27 @@ def main():
             time.sleep(0.1)
 
     def home_card():
+        # The only shelf feeds the default carousel, which intentionally omits its header.
         deadline = time.monotonic() + 15
         while True:
-            found = call('/find', {'q': 'Synthetic Film 1', 'limit': '100'})
-            cards = [item for item in found.get('items', [])
-                     if item.get('label', '').startswith('Synthetic Film 1')
-                     and item.get('type') == button_type and item.get('hittable') is True]
-            if cards:
-                return
+            found = call('/find', {'q': 'homeHero', 'role': 'Button', 'limit': '100'})
+            if (not isinstance(found, dict) or found.get('role') != 'Button'
+                    or not isinstance(found.get('items'), list)
+                    or type(found.get('count')) is not int or found['count'] != len(found['items'])):
+                raise RuntimeError('Expected the complete original Home hero button inventory')
+            cards = [item for item in found['items'] if isinstance(item, dict)
+                     and item.get('identifier') == 'homeHero' and item.get('type') == button_type
+                     and item.get('hittable') is True
+                     and re.fullmatch(r'Synthetic Film [1-6](?:,.*)?', item.get('label', ''))
+                     and isinstance(item.get('frame'), list) and len(item['frame']) == 4
+                     and all(type(value) is int for value in item['frame'])
+                     and item['frame'][2] > 0 and item['frame'][3] > 0]
+            if len(cards) == 1:
+                outcome.setdefault('homeCards', []).append({'observedAtUTC': datetime.now(timezone.utc).isoformat(),
+                    'actualButton': cards[0], 'inventoryRole': found['role'], 'inventoryCount': found['count']})
+                return cards[0]
             if time.monotonic() >= deadline:
-                raise RuntimeError('No actual accessible Home card after profile return')
+                raise RuntimeError('Expected one actual hittable synthetic Home hero button')
             time.sleep(0.2)
 
     def enable_automatic_profile():
@@ -277,7 +288,7 @@ def main():
         button_type = connect['type']  # Learn from an actual unambiguous button, never invent XCTest numeric types.
         enter('192.168.1.10 or media.example.com', 'http://127.0.0.1:' + str(args.fixture_port) + '\n')
         # MobileServerForm.onSubmit(connect) is the actual Go/return action.
-        wait('Username')
+        wait('Account')
         require_request('GET', '/health', 200, initial_requests)
         checkpoint('02-login')
         enter('Username', 'apple-smoke\n')  # MobileLoginForm advances to Password on submit.
@@ -300,26 +311,16 @@ def main():
         before_good = len(rows())
         for digit in '1234':
             tap(digit)
-        wait('Continue Watching')
+        wait('homeViewSwitcher')
         require_request('POST', '/api/users/pin/pin/verify', 200, before_good)
         require_request('GET', '/api/users/pin/settings', 200, before_good)
         require_request('GET', '/api/users/pin/history/continue', 200, before_good)
         # Require a rendered card, not merely the Home heading or a successful wire response.
-        deadline = time.monotonic() + 15
-        while True:
-            found = call('/find', {'q': 'Synthetic Film 1', 'limit': '100'})
-            cards = [item for item in found.get('items', [])
-                     if item.get('label', '').startswith('Synthetic Film 1')
-                     and item.get('type') == button_type and item.get('hittable') is True]
-            if cards:
-                break  # Mobile cards may append subtitle text to their accessibility label.
-            if time.monotonic() >= deadline:
-                raise RuntimeError('No actual visible Synthetic Film 1 card after Home loaded')
-            time.sleep(0.2)
+        home_card()
         checkpoint('06-home-with-card')
         before_short = len(rows())
         background_return('shortControl', 10)
-        wait('Continue Watching')
+        wait('homeViewSwitcher')
         home_card()
         if call('/find', {'q': 'Enter PIN for Synthetic PIN', 'limit': '100'}).get('count') != 0:
             raise RuntimeError('Short original background return unexpectedly requested a PIN')
@@ -343,7 +344,7 @@ def main():
         for digit in '1234':
             tap(digit)
         require_request('POST', '/api/users/pin/pin/verify', 200, before_good_return)
-        wait('Continue Watching')
+        wait('homeViewSwitcher')
         home_card()
         checkpoint('10-long-return-home')
         outcome['passed'] = True
