@@ -384,7 +384,9 @@ class Handler(BaseHTTPRequestHandler):
                                     'selectedAudioTrack': s.audio_index, 'selectedSubtitleTrack': -1,
                                     'audioTracks': [{'index': s.audio_index, 'codec': 'aac', 'language': 'und'}]})
         if path in ('/api/users/pin/preferences/content/tmdb%3Amovie%3A1', '/api/users/pin/preferences/content/tmdb:movie:1'):
-            if allowed('GET'):
+            if allowed('GET', ('profileId',)):
+                if query.get('profileId', ['pin']) != ['pin']:
+                    return self.reply(400, {'error': 'Only the original synthetic preference profile is supported'})
                 return self.reply(200, {'contentId': 'tmdb:movie:1', 'preferLocalFiles': False, 'localSourcePreferenceSupported': False})
             return
         if suffix == 'history/progress' and profile == 'pin':
