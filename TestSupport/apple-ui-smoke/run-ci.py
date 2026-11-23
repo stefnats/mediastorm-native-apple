@@ -326,7 +326,7 @@ def main():
         common = ['-project', 'StrmrTV.xcodeproj', '-scheme', 'StrmrMobile', '-destination', 'id=' + simulator,
                   '-derivedDataPath', str(derived), '-jobs', '2', '-parallel-testing-enabled', 'NO',
                   'ONLY_ACTIVE_ARCH=YES', 'CODE_SIGNING_ALLOWED=YES', 'CODE_SIGN_IDENTITY=-']
-        settings = json.loads(command('ios-build-settings', ['xcodebuild', '-showBuildSettings', *common, '-json'], structured=True))
+        settings = json.loads(command('ios-build-settings', ['xcodebuild', '-showBuildSettings', *common, '-json'], timeout=300, structured=True))
         app = [row['buildSettings'] for row in settings if row.get('target') == 'StrmrMobile']
         assert len(app) == 1 and app[0]['ARCHS'].split() == ['arm64']
         assert app[0]['CODE_SIGNING_ALLOWED'] == 'YES' and app[0]['CODE_SIGN_IDENTITY'] == '-'
