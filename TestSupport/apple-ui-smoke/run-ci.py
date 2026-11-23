@@ -22,7 +22,7 @@ LEAVES = {'.github/workflows/apple-source-actions.yml', 'TestSupport/apple-ui-sm
           'TestSupport/apple-ui-smoke/driver.py', 'TestSupport/apple-ui-smoke/run-ci.py',
           'TestSupport/apple-ui-smoke/generate_media.py', 'TestSupport/apple-ui-smoke/media/ui-smoke.mp4',
           'TestSupport/apple-ui-smoke/media/media-evidence.json', 'StrmrMobileUITests/MobileDriverUITests.swift'}
-PINS = {'fixture.py': '564fe8c5fd3892caf8181ed849d212408977258fd9e5362bd5ccb2aca9265bcf', 'driver.py': '8e660ea5e37c740a546aef4bbc385bf510bb0ac568dada09362f2a2a3cda71f2', 'generate_media.py': '22bce4f2f22ca06047cf2a86be9cbb02c1096efef3abd58abfd5433b478e9420', 'media/ui-smoke.mp4': 'cb5e2eb01783cacbaa09495cd5c280791ee53540257b94a5cabfe30bc651561a', 'media/media-evidence.json': '8b947d0b798e41f33b71a270171e68b54e69d95e7124e4cbfa973ce0b053123e'}
+PINS = {'fixture.py': '564fe8c5fd3892caf8181ed849d212408977258fd9e5362bd5ccb2aca9265bcf', 'driver.py': '1b5f20e49b6564b52ec4509505bb873d2d234a1889a4aeb7a8dc3eec8c726874', 'generate_media.py': '22bce4f2f22ca06047cf2a86be9cbb02c1096efef3abd58abfd5433b478e9420', 'media/ui-smoke.mp4': 'cb5e2eb01783cacbaa09495cd5c280791ee53540257b94a5cabfe30bc651561a', 'media/media-evidence.json': '8b947d0b798e41f33b71a270171e68b54e69d95e7124e4cbfa973ce0b053123e'}
 EXPECTED_CHECKPOINTS = ['01-reset-server', '02-login', '03-profiles', '04-pin-prompt', '05-bad-pin', '06-home-with-card', '07-movie-details', '08-initial-player', '09-player-progress', '10-exit-details']
 
 
