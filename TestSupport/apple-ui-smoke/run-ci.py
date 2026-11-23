@@ -22,7 +22,7 @@ LEAVES = {'.github/workflows/apple-source-actions.yml', 'TestSupport/apple-ui-sm
           'TestSupport/apple-ui-smoke/driver.py', 'TestSupport/apple-ui-smoke/run-ci.py',
           'StrmrMobileUITests/MobileDriverUITests.swift'}
 PINS = {'fixture.py': 'b6f4ef1e919f80e7ba0a3a0ad71f8b593a074935ec7159c95a29b02553edaa0b',
-        'driver.py': '9008fbee0d90f1bc1b9b9fd3a96dc0114f49e3bfbfd4d774f5bd925cad534878'}
+        'driver.py': '32dde95661f8c7f7971afa9afc4aa6240479dbd6841b2cf93d743e3ec900961f'}
 
 
 class Job:
@@ -162,6 +162,7 @@ def main():
 
     assert git('rev-parse', 'HEAD').decode().strip() == expected
     assert not git('status', '--porcelain'), 'Start from the clean exact checkout'
+    assert hashlib.sha256((source / 'StrmrMobileUITests/MobileDriverUITests.swift').read_bytes()).hexdigest() == '9372792eb54fa3995b512e6066fd91290d817c36ed3829d219119df11947e886', 'Shared test-only mobile driver changed'
     scripts = source / 'TestSupport/apple-ui-smoke'
     for name, digest in PINS.items():
         assert hashlib.sha256((scripts / name).read_bytes()).hexdigest() == digest
@@ -420,6 +421,9 @@ def main():
                 try:
                     if driver_ready:
                         driver_ping('/quit')
+                except (OSError, http.client.HTTPException, subprocess.TimeoutExpired):
+                    pass
+                try:
                     driver.wait(30)
                 except (OSError, http.client.HTTPException, subprocess.TimeoutExpired):
                     pass
