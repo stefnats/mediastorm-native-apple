@@ -22,7 +22,7 @@ LEAVES = {'.github/workflows/apple-source-actions.yml', 'TestSupport/apple-ui-sm
           'TestSupport/apple-ui-smoke/driver.py', 'TestSupport/apple-ui-smoke/run-ci.py',
           'StrmrMobileUITests/MobileDriverUITests.swift'}
 PINS = {'fixture.py': 'b6f4ef1e919f80e7ba0a3a0ad71f8b593a074935ec7159c95a29b02553edaa0b',
-        'driver.py': 'f70503b95832198861f44832620069ea9daed9b369431c905a978f3b3a332cb6'}
+        'driver.py': '388f26ba34d5627817a2b46b92052797d3aa4708991034c9d061e29c4a044340'}
 
 
 class Job:
