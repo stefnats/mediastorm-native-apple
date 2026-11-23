@@ -21,7 +21,7 @@ BASE = '9e70ae1a023190c91463e085f480deedbe697254'
 LEAVES = {'.github/workflows/apple-source-actions.yml', 'TestSupport/apple-ui-smoke/fixture.py',
           'TestSupport/apple-ui-smoke/driver.py', 'TestSupport/apple-ui-smoke/run-ci.py'}
 PINS = {'fixture.py': 'b6f4ef1e919f80e7ba0a3a0ad71f8b593a074935ec7159c95a29b02553edaa0b',
-        'driver.py': '9d3a5b62d172dc31fde96a27f8cca2cbc5b204b045f57a71a1f09e9310847e92'}
+        'driver.py': 'd59d65b9a8868f25a16411e92fe66f4ae77039f2683065cb58317290c3e5131a'}
 
 
 class Job:

@@ -6,9 +6,47 @@ import hashlib
 import http.client
 import json
 from pathlib import Path
+import re
 import time
 import traceback
 from urllib.parse import urlencode
+
+
+def observed_input(tree, inventory, field, role):
+    """Match an actual input role/placeholder to one live driver inventory frame."""
+    if role not in ('TextField', 'SecureTextField') or not isinstance(tree, bytes):
+        raise RuntimeError('Expected an original input role and accessibility tree')
+    if not isinstance(inventory, dict) or not isinstance(inventory.get('items'), list):
+        raise RuntimeError('Expected the original mobile element inventory')
+    if inventory.get('count') != len(inventory['items']):
+        raise RuntimeError('The actual input inventory is truncated')
+    text = tree.decode()
+    if 'Element subtree:\n' not in text:
+        raise RuntimeError('No original accessibility element subtree')
+    subtree = text.split('Element subtree:\n', 1)[1].split('Path to element:', 1)[0]
+    number = r'-?\d+(?:\.\d+)?'
+    pattern = re.compile(r'^\s*(TextField|SecureTextField),\s+0x[0-9a-fA-F]+,\s+'
+                         r'\{\{(' + number + r'),\s*(' + number + r')\},\s*\{('
+                         + number + r'),\s*(' + number + r')\}\}(.*)$', re.MULTILINE)
+    candidates = []
+    for match in pattern.finditer(subtree):
+        attributes = dict(re.findall(r"(?:^|,\s+)(label|identifier|placeholderValue|value): '([^']*)'", match[6]))
+        if match[1] != role or field not in [attributes.get(key) for key in ('label', 'identifier', 'placeholderValue')]:
+            continue
+        frame = [int(float(match[index])) for index in range(2, 6)]
+        if frame[2] <= 0 or frame[3] <= 0:
+            continue
+        candidates.append({'role': role, 'frame': frame, 'attributes': attributes,
+                           'hasKeyboardFocus': bool(re.search(r'\bhasKeyboardFocus\b', match[6]))})
+    if len(candidates) != 1:
+        raise RuntimeError('Expected one actual ' + role + ' for ' + field + '; found ' + str(len(candidates)))
+    element = candidates[0]
+    items = [item for item in inventory['items'] if isinstance(item, dict)
+             and item.get('frame') == element['frame'] and item.get('hittable') is True
+             and isinstance(item.get('type'), str) and item['type']]
+    if len(items) != 1:
+        raise RuntimeError('Expected one hittable inventory input at the observed ' + field + ' frame')
+    return element, items[0]
 
 
 def main():
@@ -28,7 +66,8 @@ def main():
     args.output.mkdir(mode=0o700)
     outcome = {'scope': 'iPhone simulator onboarding/PIN/Home UI only', 'appleUIExecuted': False,
                'passed': False, 'steps': [], 'cleanupErrors': [], 'driverQuitAcknowledged': False,
-               'xcodebuildProcessJoined': False, 'operatorMustJoinOriginalXcodebuild': True}
+               'xcodebuildProcessJoined': False, 'operatorMustJoinOriginalXcodebuild': True,
+               'inputSelections': []}
     connected = False
     button_type = None
 
@@ -83,8 +122,50 @@ def main():
 
     def enter(label, value):
         # Only public synthetic fixture values are ever typed by this controller.
-        tap_item(find(label))
-        call('/type', {'text': value})
+        role = 'SecureTextField' if label == 'Password' else 'TextField'
+
+        def current_input():
+            tree = call('/tree')
+            inventory = call('/find', {'q': '', 'limit': '1000'})
+            element, item = observed_input(tree, inventory, label, role)
+            return tree, element, item
+
+        tree, element, item = current_input()
+        initial_value = item.get('value', '')
+        selected = {'field': label, 'role': role, 'frame': item['frame'], 'rawType': item['type'],
+                    'label': item.get('label', ''), 'identifier': item.get('identifier', ''),
+                    'placeholder': element['attributes'].get('placeholderValue'), 'hittable': True,
+                    'treeSHA256': hashlib.sha256(tree).hexdigest()}
+        outcome['inputSelections'].append(selected)
+        tap_item(item)
+        deadline = time.monotonic() + 5
+        while True:
+            tree, element, item = current_input()
+            keyboard = bool(re.search(rb'^\s*Keyboard,\s+0x[0-9a-fA-F]+,', tree, re.MULTILINE))
+            if keyboard or element['hasKeyboardFocus'] or time.monotonic() >= deadline:
+                selected['keyboardWitness'] = {'keyboardElement': keyboard,
+                    'inputHasKeyboardFocus': element['hasKeyboardFocus'],
+                    'observationalOnly': True,
+                    'treeSHA256': hashlib.sha256(tree).hexdigest()}
+                break
+            time.sleep(0.2)
+        text = value.removesuffix('\n')
+        call('/type', {'text': text})  # HTTP 500 is fatal; never retry a failed XCTest event.
+        selected['actualTypeAccepted'] = True
+        tree, element, item = current_input()
+        actual = item.get('value', '')
+        if role == 'SecureTextField':
+            if not isinstance(actual, str) or not actual or actual == label or actual == initial_value:
+                raise RuntimeError('The actual secure input does not show completed entry')
+            selected['secureValuePresent'] = True  # Do not record the password or secure-field value.
+        else:
+            if actual != text or actual == initial_value:
+                raise RuntimeError('The actual input value does not match the typed ' + label)
+            selected['confirmedValue'] = actual
+        selected['valueTreeSHA256'] = hashlib.sha256(tree).hexdigest()
+        selected['actualInputValueChanged'] = True
+        if value.endswith('\n'):
+            call('/type', {'text': '\n'})  # Submit only after the actual field value was confirmed.
 
     def rows():
         data = args.fixture_log.read_text()
@@ -114,19 +195,7 @@ def main():
         checkpoint('01-reset-server')
         connect = find('Connect', hittable=False)
         button_type = connect['type']  # Learn from an actual unambiguous button, never invent XCTest numeric types.
-        fields = []
-        for label in ('192.168.1.10 or media.example.com', 'Server Address'):
-            try:
-                item = find(label)
-                if item['type'] != button_type:
-                    fields.append(item)
-                    break
-            except RuntimeError:
-                continue
-        if not fields:
-            raise RuntimeError('No unique actual server address field; inspect saved tree')
-        tap_item(fields[0])
-        call('/type', {'text': 'http://127.0.0.1:' + str(args.fixture_port) + '\n'})
+        enter('192.168.1.10 or media.example.com', 'http://127.0.0.1:' + str(args.fixture_port) + '\n')
         # MobileServerForm.onSubmit(connect) is the actual Go/return action.
         wait('Username')
         require_request('GET', '/health', 200, initial_requests)
