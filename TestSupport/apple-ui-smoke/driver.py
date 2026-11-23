@@ -284,6 +284,30 @@ def main():
         if value.endswith('\n'):
             call('/type', {'text': '\n'})  # Submit only after the actual field value was confirmed.
 
+    def home_card():
+        # The only shelf feeds the default carousel, which intentionally omits its header.
+        deadline = time.monotonic() + 15
+        while True:
+            found = call('/find', {'q': 'homeHero', 'role': 'Button', 'limit': '100'})
+            if (not isinstance(found, dict) or found.get('role') != 'Button'
+                    or not isinstance(found.get('items'), list)
+                    or type(found.get('count')) is not int or found['count'] != len(found['items'])):
+                raise RuntimeError('Expected the complete original Home hero button inventory')
+            cards = [item for item in found['items'] if isinstance(item, dict)
+                     and item.get('identifier') == 'homeHero' and item.get('type') == button_type
+                     and item.get('hittable') is True
+                     and re.fullmatch(r'Synthetic Film [1-6](?:,.*)?', item.get('label', ''))
+                     and isinstance(item.get('frame'), list) and len(item['frame']) == 4
+                     and all(type(value) is int for value in item['frame'])
+                     and item['frame'][2] > 0 and item['frame'][3] > 0]
+            if len(cards) == 1:
+                outcome.setdefault('homeCards', []).append({'observedAtUTC': datetime.now(timezone.utc).isoformat(),
+                    'actualButton': cards[0], 'inventoryRole': found['role'], 'inventoryCount': found['count']})
+                return cards[0]
+            if time.monotonic() >= deadline:
+                raise RuntimeError('Expected one actual hittable synthetic Home hero button')
+            time.sleep(0.2)
+
     def rows():
         data = args.fixture_log.read_text()
         return [json.loads(line) for line in data.splitlines() if line]
@@ -348,16 +372,37 @@ def main():
                 raise RuntimeError('Original player did not fetch actual own MP4 bytes')
             time.sleep(0.25)
 
+    def select_film_one(record):
+        deadline = time.monotonic() + 15
+        gestures = record['carouselGestures'] = []
+        while True:
+            card = home_card()
+            if time.monotonic() >= deadline:
+                raise RuntimeError('Film1 carousel selection deadline expired')
+            if re.fullmatch(r'Synthetic Film 1(?:,.*)?', card['label']):
+                tree = call('/tree')
+                inventory = call('/find', {'q': 'homeHero', 'role': 'Button', 'limit': '100'})
+                selected = observed_button(tree, inventory, ('Synthetic Film 1',), prefix=True)
+                if selected.get('identifier') != 'homeHero' or selected.get('type') != button_type:
+                    raise RuntimeError('Film1 is not the original observed Home hero button')
+                if time.monotonic() >= deadline:
+                    raise RuntimeError('Film1 observation completed after the carousel selection deadline')
+                return selected
+            if len(gestures) >= 6 or time.monotonic() >= deadline:
+                raise RuntimeError('Film1 was not actually visible within the bounded carousel selection')
+            call('/swipe', {'q': 'homeCarousel', 'dir': 'right', 'n': '1'})
+            gestures.append({'observedAtUTC': datetime.now(timezone.utc).isoformat(),
+                             'fromActualButton': card, 'direction': 'right'})
+
     def playback_smoke():
         record = outcome['playback'] = {'scope': 'Draft local synthetic media UI, not physical decoder/PiP acceptance',
                                         'testPatternVisualAcceptance': 'requires independent Root artifact inspection'}
         before_details = len(rows())
         if fixture_evidence()['events']:
             raise RuntimeError('Unexpected playback work before an explicit title/play action')
-        card, tree, inventory = current_button(('Synthetic Film 1',), prefix=True)
-        if card.get('type') != button_type:
-            raise RuntimeError('Home title is not the original observed button type')
-        tap_item(card)
+        card = select_film_one(record)
+        record['actualFilmOneControl'] = card
+        call('/tap', {'q': card['label']})
         require_request('GET', '/api/users/pin/details-bundle', 200, before_details)
         wait('Play')
         play, tree, inventory = current_button(('Play',))
@@ -449,7 +494,7 @@ def main():
         button_type = connect['type']  # Learn from an actual unambiguous button, never invent XCTest numeric types.
         enter('192.168.1.10 or media.example.com', 'http://127.0.0.1:' + str(args.fixture_port) + '\n')
         # MobileServerForm.onSubmit(connect) is the actual Go/return action.
-        wait('Username')
+        wait('Account')
         require_request('GET', '/health', 200, initial_requests)
         checkpoint('02-login')
         enter('Username', 'apple-smoke\n')  # MobileLoginForm advances to Password on submit.
@@ -470,22 +515,11 @@ def main():
         before_good = len(rows())
         for digit in '1234':
             tap(digit)
-        wait('Continue Watching')
+        wait('homeViewSwitcher')
         require_request('POST', '/api/users/pin/pin/verify', 200, before_good)
         require_request('GET', '/api/users/pin/settings', 200, before_good)
         require_request('GET', '/api/users/pin/history/continue', 200, before_good)
-        # Require a rendered card, not merely the Home heading or a successful wire response.
-        deadline = time.monotonic() + 15
-        while True:
-            found = call('/find', {'q': 'Synthetic Film 1', 'limit': '100'})
-            cards = [item for item in found.get('items', [])
-                     if item.get('label', '').startswith('Synthetic Film 1')
-                     and item.get('type') == button_type and item.get('hittable') is True]
-            if cards:
-                break  # Mobile cards may append subtitle text to their accessibility label.
-            if time.monotonic() >= deadline:
-                raise RuntimeError('No actual visible Synthetic Film 1 card after Home loaded')
-            time.sleep(0.2)
+        home_card()
         checkpoint('06-home-with-card')
         playback_smoke()
         outcome['passed'] = True
