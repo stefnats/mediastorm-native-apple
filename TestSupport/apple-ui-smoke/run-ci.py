@@ -97,7 +97,7 @@ def main():
         parser.error('Use a new absolute output directory under the checkout artifacts directory')
 
     def git(*argv):
-        return subprocess.check_output(['git', *argv], timeout=15)
+        return subprocess.check_output(['git', *argv], timeout=60)
 
     assert git('rev-parse', 'HEAD').decode().strip() == expected
     assert not git('status', '--porcelain'), 'Start from the clean exact checkout'
@@ -117,19 +117,38 @@ def main():
                HOMEBREW_NO_ANALYTICS='1', HOMEBREW_NO_INSTALL_CLEANUP='1')
     state = {'passed': False, 'appleUIExecuted': False, 'head': expected, 'appBaseline': BASE,
              'scope': 'Single original iPhone UI-driver case plus synthetic onboarding/PIN/Home assertions',
-             'jobs': [], 'errors': [], 'lifecycleErrors': [], 'physicalDeviceAcceptance': False,
-             'previous924UnitCasesRerun': False}
+             'jobs': [], 'stages': [], 'diagnosticErrors': [], 'errors': [], 'lifecycleErrors': [], 'physicalDeviceAcceptance': False,
+             'previous924UnitCasesRerun': False, 'actualPython': sys.version, 'pythonExecutable': sys.executable}
     fixture = driver = None
     simulator = None
+    simulator_boot_started = False
     driver_ready = False
 
+    def stage(name):
+        event = {'phase': name, 'atUTC': datetime.now(timezone.utc).isoformat()}
+        state['stages'].append(event)
+        print(json.dumps(event), flush=True)
+
     def command(name, argv, timeout=120, structured=False):
+        stage(name + ':start')
         job = Job(name, argv, output, env, separate_stderr=structured)
         try:
             assert job.wait(timeout) == 0, name + ' failed; inspect retained log'
         finally:
-            state['jobs'].append(job.stop(5))
+            joined = job.stop(5)
+            state['jobs'].append(joined)
+            stage(name + ':joined:' + str(joined['exitCode']))
         return (output / (name + '.log')).read_text()
+
+    def resources(phase):
+        stage(phase + ':resources')
+        for label, argv in [('vm-stat', ['/usr/bin/vm_stat']),
+                            ('swap-usage', ['/usr/sbin/sysctl', '-n', 'vm.swapusage']),
+                            ('workspace-disk', ['/bin/df', '-k', str(source)])]:
+            try:
+                command(phase + '-' + label, argv, 60)
+            except (subprocess.SubprocessError, AssertionError, OSError) as error:
+                state['diagnosticErrors'].append(phase + '-' + label + ': ' + str(error))
 
     def driver_ping(path):
         connection = http.client.HTTPConnection('127.0.0.1', 7791, timeout=1)
@@ -142,6 +161,7 @@ def main():
             connection.close()
 
     def source_check(phase):
+        stage(phase + ':source-check:start')
         status = git('status', '--porcelain=v1', '--untracked-files=all')
         (output / (phase + '-git-status.txt')).write_bytes(status)
         (output / (phase + '-generated-project.patch')).write_bytes(git('diff', '--binary', 'HEAD', '--', 'StrmrTV.xcodeproj'))
@@ -149,6 +169,7 @@ def main():
         paths += git('ls-files', '--others', '--exclude-standard', '-z').split(b'\0')
         assert all(not p or p.startswith((b'StrmrTV.xcodeproj/', b'artifacts/', b'.build/')) for p in paths), 'Unexpected source mutation'
         assert git('rev-parse', 'HEAD').decode().strip() == expected
+        stage(phase + ':source-check:exact')
 
     def interrupted(signum, frame):
         raise RuntimeError('Interrupted by signal ' + str(signum))
@@ -160,7 +181,7 @@ def main():
         assert origin in {'https://github.com/stefnats/mediastorm-native-apple',
                           'https://github.com/stefnats/mediastorm-native-apple.git'}, 'Unexpected checkout origin'
         base_present = subprocess.run(['git', 'cat-file', '-e', BASE + '^{commit}'], env=env,
-                                      stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=15)
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=60)
         if base_present.returncode != 0:
             command('baseline-fetch', ['git', '-c', 'maintenance.auto=false', '-c', 'gc.auto=0',
                                        'fetch', '--no-tags', '--depth=1', '--no-recurse-submodules', 'origin', BASE])
@@ -203,11 +224,13 @@ def main():
         (output / 'generated-entitlements.json').write_text(json.dumps(records, indent=2) + '\n')
         with socket.socket() as probe:
             probe.bind(('127.0.0.1', 7791))  # Never attach to an already running unrelated driver.
-        command('simulator-boot', ['xcrun', 'simctl', 'boot', simulator])
-        command('simulator-ready', ['xcrun', 'simctl', 'bootstatus', simulator, '-b'], 180)
+        resources('before-boot')
+        command('fixture-python-help', [sys.executable, str(scripts / 'fixture.py'), '--help'], 60)
+        command('controller-python-help', [sys.executable, str(scripts / 'driver.py'), '--help'], 60)
+        stage('fixture:start-before-boot')
         fixture = Job('fixture', [sys.executable, str(scripts / 'fixture.py'), '--port', '0', '--log', str(output / 'fixture-requests.jsonl'),
                                   '--ready-file', str(output / 'fixture-ready.json'), '--duration-seconds', '900'], output, env)
-        deadline = time.monotonic() + 10
+        deadline = time.monotonic() + 60
         while True:
             assert fixture.child.poll() is None, 'Fixture exited before readiness'
             try:
@@ -218,6 +241,18 @@ def main():
                 time.sleep(0.1)
         assert ready['origin'].startswith('http://127.0.0.1:')
         port = ready['origin'].rsplit(':', 1)[1]
+        health = http.client.HTTPConnection('127.0.0.1', int(port), timeout=3)
+        try:
+            health.request('GET', '/health')
+            reply = health.getresponse()
+            assert reply.status == 200 and json.loads(reply.read()) == {'status': 'ok'}, 'Actual preboot fixture health failed'
+        finally:
+            health.close()
+        stage('fixture:actual-health-200-before-boot')
+        simulator_boot_started = True
+        command('simulator-boot', ['xcrun', 'simctl', 'boot', simulator])
+        command('simulator-ready', ['xcrun', 'simctl', 'bootstatus', simulator, '-b'], 180)
+        resources('after-boot')
         driver_env = dict(env, TEST_RUNNER_STRMR_DRIVER='1', TEST_RUNNER_STRMR_DRIVER_PORT='7791')
         driver = Job('xctest-ui-driver', ['xcodebuild', 'test-without-building', *common, selected_test,
                                         '-resultBundlePath', str(output / 'iPhone-UI.xcresult')], output, driver_env)
@@ -249,6 +284,7 @@ def main():
         state['errors'].append(type(error).__name__ + ': ' + str(error))
         (output / 'failure.txt').write_text(traceback.format_exc())
     finally:
+        stage('cleanup:start')
         for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
             signal.signal(sig, signal.SIG_IGN)
         if driver is not None:
@@ -268,9 +304,9 @@ def main():
             state['jobs'].append(joined)
             if joined['exitCode'] != 0 or joined['forcedKill'] or joined['terminationErrors']:
                 state['lifecycleErrors'].append('Original synthetic fixture did not close normally')
-        if simulator is not None:
+        if simulator_boot_started:
             try:
-                command('simulator-shutdown', ['xcrun', 'simctl', 'shutdown', simulator], 30)
+                command('simulator-shutdown', ['xcrun', 'simctl', 'shutdown', simulator], 120)
             except BaseException as error:
                 state['lifecycleErrors'].append('Simulator shutdown: ' + str(error))
         try:
