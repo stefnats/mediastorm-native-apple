@@ -202,7 +202,7 @@ def main():
         button_type = connect['type']  # Learn from an actual unambiguous button, never invent XCTest numeric types.
         enter('192.168.1.10 or media.example.com', 'http://127.0.0.1:' + str(args.fixture_port) + '\n')
         # MobileServerForm.onSubmit(connect) is the actual Go/return action.
-        wait('Username')
+        wait('Account')
         require_request('GET', '/health', 200, initial_requests)
         checkpoint('02-login')
         enter('Username', 'apple-smoke\n')  # MobileLoginForm advances to Password on submit.
