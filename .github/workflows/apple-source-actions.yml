@@ -1,12 +1,11 @@
-name: Apple source-action tests
+# Test-branch-only replacement of the already registered workflow; do not merge into the baseline branch.
+name: Apple synthetic iPhone UI smoke
 
 on:
-  push:
-    branches: [feature/integrated-requirements]
   workflow_dispatch:
     inputs:
       source_ref:
-        description: Exact reviewed 40-character source commit
+        description: Exact reviewed 40-character smoke-branch commit
         required: true
         type: string
 
@@ -14,149 +13,43 @@ permissions:
   contents: read
 
 concurrency:
-  group: apple-source-actions-${{ inputs.source_ref || github.sha }}
+  group: apple-iphone-onboarding-smoke
   cancel-in-progress: false
 
 jobs:
-  simulator-tests:
+  iphone-ui-smoke:
+    if: ${{ github.repository == 'stefnats/mediastorm-native-apple' && github.event.repository.private == false && github.ref == 'refs/heads/test/apple-iphone-onboarding-smoke' }}
     runs-on: xcode-27
-    timeout-minutes: 90
+    timeout-minutes: 60
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.app/Contents/Developer
-      SOURCE_REF: ${{ inputs.source_ref || github.sha }}
+      SOURCE_REF: ${{ inputs.source_ref }}
+      PYTHONDONTWRITEBYTECODE: '1'
     defaults:
       run:
         shell: bash
     steps:
-      - name: Require an immutable source reference
+      - name: Require the reviewed immutable branch head
         run: |
           set -euo pipefail
           [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0, Node 24
+          [[ "$SOURCE_REF" == "$GITHUB_SHA" ]]
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
-          ref: ${{ inputs.source_ref || github.sha }}
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 2
           persist-credentials: false
-      - name: Record actual source and supported tools
-        id: prepare
+      - name: Run the actual original iPhone driver against the synthetic fixture
         run: |
           set -euo pipefail
-          mkdir -p artifacts .build/temporary
-          export TMPDIR="$GITHUB_WORKSPACE/.build/temporary"
-          [[ "$(git rev-parse HEAD)" == "$SOURCE_REF" ]]
-          [[ -z "$(git status --porcelain)" ]]
-          git rev-parse HEAD > artifacts/source-head.txt
-          [[ "$(uname -m)" == arm64 ]]
-          xcodebuild -version | tee artifacts/xcode-version.txt
-          xcrun swift --version | tee artifacts/swift-version.txt
-          python3 - <<'PY'
-          import pathlib,re
-          text=pathlib.Path('artifacts/swift-version.txt').read_text()
-          match=re.search(r'Swift version (\d+)\.(\d+)',text)
-          assert match and tuple(map(int,match.groups())) >= (6,4), 'Pinned AetherEngine 7.47.0 requires Swift 6.4+'
-          xcode=pathlib.Path('artifacts/xcode-version.txt').read_text()
-          match=re.search(r'Xcode (\d+)',xcode)
-          assert match and int(match.group(1)) >= 27, 'Pinned AetherEngine 7.47.0 requires Xcode 27+'
-          PY
-          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
-          xcodegen --version | tee artifacts/xcodegen-version.txt
-          xcodegen generate
-          git diff --exit-code -- '*.swift' project.yml
-          git diff --binary > artifacts/generated-project-inputs.patch
-          xcodebuild -list -project StrmrTV.xcodeproj > artifacts/project-schemes.txt
-          xcrun simctl list devices available --json > artifacts/available-simulators.json
-          python3 - <<'PY'
-          import json,pathlib,re
-          data=json.loads(pathlib.Path('artifacts/available-simulators.json').read_text())
-          candidates=[]
-          for runtime,devices in data['devices'].items():
-              match=re.search(r'tvOS-(\d+)-(\d+)',runtime)
-              if not match or int(match.group(1)) < 18: continue
-              for device in devices:
-                  if device.get('isAvailable') and device.get('name','').startswith('Apple TV'):
-                      candidates.append((tuple(map(int,match.groups())),device['udid']))
-          assert candidates, 'No actual available Apple TV simulator for tvOS 18+ found'
-          pathlib.Path('artifacts/tvos-destination.txt').write_text('id='+sorted(candidates,reverse=True)[0][1])
-          phones=[]
-          for runtime,devices in data['devices'].items():
-              match=re.search(r'iOS-(\d+)-(\d+)',runtime)
-              if not match or int(match.group(1)) < 18: continue
-              for device in devices:
-                  if device.get('isAvailable') and device.get('name','').startswith('iPhone'):
-                      phones.append((tuple(map(int,match.groups())),device['udid']))
-          assert phones, 'No actual available iPhone simulator for iOS 18+ found'
-          pathlib.Path('artifacts/ios-unit-destination.txt').write_text('id='+sorted(phones,reverse=True)[0][1])
-          PY
-      - name: Run hosted tvOS XCTest unit suite
-        run: |
-          set -euo pipefail
-          export TMPDIR="$GITHUB_WORKSPACE/.build/temporary"
-          xcodebuild test -project StrmrTV.xcodeproj -scheme StrmrTV \
-            -destination "$(cat artifacts/tvos-destination.txt)" \
-            -derivedDataPath .build/derived-data \
-            -resultBundlePath artifacts/SourceActions.xcresult \
-            -only-testing:StrmrTVTests \
-            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- 2>&1 | tee artifacts/tvos-xctest.log
-      - name: Record actual tvOS test-host signing
-        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
-        run: |
-          set -euo pipefail
-          codesign -d --verbose=4 .build/derived-data/Build/Products/Debug-appletvsimulator/StrmrTV.app 2> artifacts/tvos-codesign.txt
-          python3 - <<'PYCODE'
-          import json,pathlib,plistlib
-          signature=pathlib.Path('artifacts/tvos-codesign.txt').read_text()
-          assert 'Signature=adhoc' in signature, 'Expected a locally signed simulator test host'
-          root=pathlib.Path('.build/derived-data/Build/Intermediates.noindex')
-          records=[]
-          for path in sorted(root.rglob('*.xcent')):
-              records.append({'path':str(path),'entitlements':plistlib.loads(path.read_bytes())})
-          pathlib.Path('artifacts/tvos-generated-entitlements.json').write_text(json.dumps(records,indent=2)+'\n')
-          assert records, 'Expected actual generated simulator entitlement records'
-          PYCODE
-      - name: Preserve tvOS diagnostics before the iOS build
-        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0, Node 24
-        with:
-          name: apple-tvos-diagnostics-${{ inputs.source_ref || github.sha }}
-          path: artifacts/tvos-xctest.log
-          if-no-files-found: error
-          retention-days: 14
-      - name: Compile the shared iOS application and phone UI
-        id: ios_build
-        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
-        run: |
-          set -euo pipefail
-          export TMPDIR="$GITHUB_WORKSPACE/.build/temporary"
-          xcodebuild -showBuildSettings -project StrmrTV.xcodeproj -scheme StrmrMobile \
-            -destination "$(cat artifacts/ios-unit-destination.txt)" \
-            ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- -json > artifacts/ios-build-settings.json
-          python3 - <<'PYCODE'
-          import json,pathlib
-          targets=json.loads(pathlib.Path('artifacts/ios-build-settings.json').read_text())
-          settings=[item['buildSettings'] for item in targets if item.get('target') == 'StrmrMobile']
-          assert len(settings) == 1, 'Expected exactly one actual iOS application target'
-          assert settings[0]['ARCHS'].split() == ['arm64'], 'The inherited Iroh simulator framework requires arm64'
-          assert settings[0]['CODE_SIGNING_ALLOWED'] == 'YES' and settings[0]['CODE_SIGN_IDENTITY'] == '-', 'Simulator tests require local ad-hoc signing'
-          PYCODE
-          xcodebuild build -project StrmrTV.xcodeproj -scheme StrmrMobile \
-            -destination "$(cat artifacts/ios-unit-destination.txt)" \
-            -derivedDataPath .build/derived-data \
-            ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- 2>&1 | tee artifacts/ios-build.log
-      - name: Run hosted iPhone shared unit suite
-        if: ${{ !cancelled() && steps.prepare.outcome == 'success' && steps.ios_build.outcome == 'success' }}
-        run: |
-          set -euo pipefail
-          export TMPDIR="$GITHUB_WORKSPACE/.build/temporary"
-          xcodebuild test -project StrmrTV.xcodeproj -scheme StrmrMobile \
-            -destination "$(cat artifacts/ios-unit-destination.txt)" \
-            -derivedDataPath .build/derived-data \
-            -resultBundlePath artifacts/LiveAdmission-iOS.xcresult \
-            -only-testing:StrmrMobileTests -parallel-testing-enabled NO \
-            ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- 2>&1 | tee artifacts/ios-unit-xctest.log
-      - name: Preserve actual logs and XCTest results
+          mkdir -p artifacts
+          python3 TestSupport/apple-ui-smoke/run-ci.py --output "$GITHUB_WORKSPACE/artifacts/iphone-ui-smoke"
+      - name: Preserve actual UI, process and XCTest evidence
         if: always()
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0, Node 24
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
         with:
-          name: apple-source-actions-${{ inputs.source_ref || github.sha }}
-          path: artifacts/
+          name: apple-iphone-ui-smoke-${{ inputs.source_ref }}
+          path: artifacts/iphone-ui-smoke/
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 1
+          compression-level: 9
