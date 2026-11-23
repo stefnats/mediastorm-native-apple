@@ -179,7 +179,8 @@ def main():
                HOMEBREW_NO_ANALYTICS='1', HOMEBREW_NO_INSTALL_CLEANUP='1')
     state = {'passed': False, 'appleUIExecuted': False, 'head': expected, 'appBaseline': BASE,
              'scope': 'Single original iPhone UI-driver case with synthetic onboarding/PIN/Home/playback/progress/Close assertions',
-             'jobs': [], 'stages': [], 'diagnosticErrors': [], 'errors': [], 'lifecycleErrors': [], 'physicalDeviceAcceptance': False,
+             'jobs': [], 'stages': [], 'startupTimings': [], 'startupDiagnostics': [],
+             'diagnosticErrors': [], 'errors': [], 'lifecycleErrors': [], 'physicalDeviceAcceptance': False,
              'previous924UnitCasesRerun': False,
              'testPatternVisualAcceptance': 'requires independent Root artifact inspection', 'actualPython': sys.version, 'pythonExecutable': sys.executable}
     fixture = driver = None
@@ -193,14 +194,27 @@ def main():
         state['stages'].append(event)
         print(json.dumps(event), flush=True)
 
-    def command(name, argv, timeout=120, structured=False):
+    def startup_timing(name, job, started):
+        ended = time.monotonic()
+        state['startupTimings'].append({'phase': name, 'childPID': job.child.pid,
+            'startMonotonic': started, 'endMonotonic': ended, 'elapsedSeconds': ended - started,
+            'childExitAtPhaseEnd': job.child.poll()})
+
+    def command(name, argv, timeout=120, structured=False, cleanup_grace=5):
         stage(name + ':start')
+        started = time.monotonic()
         job = Job(name, argv, output, env, separate_stderr=structured)
         try:
             assert job.wait(timeout) == 0, name + ' failed; inspect retained log'
+        except BaseException:
+            if name in ('simulator-boot', 'simulator-ready'):
+                startup_diagnostics(name, job)
+            raise
         finally:
-            joined = job.stop(5)
+            joined = job.stop(cleanup_grace)
             state['jobs'].append(joined)
+            if name in ('simulator-boot', 'simulator-ready', 'simulator-shutdown'):
+                startup_timing(name, job, started)
             stage(name + ':joined:' + str(joined['exitCode']))
         return (output / (name + '.log')).read_text()
 
@@ -223,6 +237,41 @@ def main():
             return reply.status == 200 and data.strip() == (b'ok' if path == '/ping' else b'bye')
         finally:
             connection.close()
+
+    def startup_diagnostics(phase, owned):
+        # Best effort only. Never enumerate arguments/environment or operate on another simulator.
+        started = time.monotonic()
+        deadline = started + 25
+        record = {'phase': phase, 'ownedChildPID': owned.child.pid, 'simulatorUDID': simulator,
+                  'startMonotonic': started, 'probes': []}
+        state['startupDiagnostics'].append(record)
+
+        def probe(label, argv, structured=False):
+            remaining = deadline - time.monotonic()
+            if remaining <= 1:
+                record['probes'].append({'name': label, 'skipped': 'diagnostic budget exhausted'})
+                return None
+            try:
+                text = command('diagnostic-' + phase + '-' + label, argv,
+                               min(3, remaining - 1), structured=structured, cleanup_grace=1)
+                record['probes'].append({'name': label, 'completed': True})
+                return text
+            except (OSError, subprocess.SubprocessError, AssertionError) as error:
+                record['probes'].append({'name': label, 'error': type(error).__name__ + ': ' + str(error)})
+                return None
+
+        probe('process', ['/bin/ps', '-p', str(owned.child.pid), '-o', 'pid=,ppid=,state=,etime=,comm='])
+        # Inspect installed command help before admitting optional diagnostic verbs.
+        listing = probe('list-help', ['xcrun', 'simctl', 'help', 'list'])
+        if listing and 'search' in listing.lower():
+            probe('owned-device', ['xcrun', 'simctl', 'list', 'devices', simulator, '--json'], structured=True)
+        imaging = probe('io-help', ['xcrun', 'simctl', 'help', 'io'])
+        if imaging and re.search(r'^\s*screenshot\b', imaging, re.MULTILINE):
+            image = output / ('diagnostic-' + phase + '-owned-simulator.png')
+            probe('owned-screenshot', ['xcrun', 'simctl', 'io', simulator, 'screenshot', str(image)])
+        record['endMonotonic'] = time.monotonic()
+        record['elapsedSeconds'] = record['endMonotonic'] - started
+        record['meaning'] = 'Startup diagnostics only, never UI-test or controller acceptance'
 
     def source_check(phase):
         stage(phase + ':source-check:start')
@@ -300,7 +349,7 @@ def main():
         command('controller-python-help', [sys.executable, str(scripts / 'driver.py'), '--help'], 60)
         stage('fixture:start-before-boot')
         fixture = Job('fixture', [sys.executable, str(scripts / 'fixture.py'), '--media-evidence', str(scripts / 'media/media-evidence.json'), '--port', '0', '--log', str(output / 'fixture-requests.jsonl'),
-                                  '--ready-file', str(output / 'fixture-ready.json'), '--duration-seconds', '900'], output, env)
+                                  '--ready-file', str(output / 'fixture-ready.json'), '--duration-seconds', '1800'], output, env)
         deadline = time.monotonic() + 60
         while True:
             assert fixture.child.poll() is None, 'Fixture exited before readiness'
@@ -322,23 +371,32 @@ def main():
         stage('fixture:actual-health-200-before-boot')
         simulator_boot_started = True
         command('simulator-boot', ['xcrun', 'simctl', 'boot', simulator])
-        command('simulator-ready', ['xcrun', 'simctl', 'bootstatus', simulator, '-b'], 180)
+        command('simulator-ready', ['xcrun', 'simctl', 'bootstatus', simulator, '-b'], 360)
         resources('after-boot')
         driver_env = dict(env, TEST_RUNNER_STRMR_DRIVER='1', TEST_RUNNER_STRMR_DRIVER_PORT='7791')
+        readiness_started = time.monotonic()
+        stage('driver-readiness:start')
         driver = Job('xctest-ui-driver', ['xcodebuild', 'test-without-building', '-xctestrun', str(test_plan),
                                         '-destination', 'id=' + simulator, '-parallel-testing-enabled', 'NO', selected_test,
                                         '-resultBundlePath', str(output / 'iPhone-UI.xcresult')], output, driver_env)
-        deadline = time.monotonic() + 180
-        while True:
-            assert driver.child.poll() is None, 'Original UI-driver XCTest exited before readiness'
-            try:
-                driver_ready = driver_ping('/ping')
-            except (OSError, http.client.HTTPException):
-                driver_ready = False
-            if driver_ready:
-                break
-            assert time.monotonic() < deadline, 'UI-driver readiness timed out'
-            time.sleep(1)
+        deadline = readiness_started + 360
+        try:
+            while True:
+                assert driver.child.poll() is None, 'Original UI-driver XCTest exited before readiness'
+                try:
+                    driver_ready = driver_ping('/ping')
+                except (OSError, http.client.HTTPException):
+                    driver_ready = False
+                if driver_ready:
+                    break
+                assert time.monotonic() < deadline, 'UI-driver readiness timed out'
+                time.sleep(1)
+        except BaseException:
+            startup_diagnostics('driver-readiness', driver)
+            raise
+        finally:
+            startup_timing('driver-readiness', driver, readiness_started)
+            stage('driver-readiness:end')
         command('controller', [sys.executable, str(scripts / 'driver.py'), '--owned-driver', '--driver-port', '7791',
                                '--fixture-port', port, '--fixture-log', str(output / 'fixture-requests.jsonl'),
                                '--output', str(output / 'ui')], 300)
@@ -380,7 +438,7 @@ def main():
                 state['lifecycleErrors'].append('Original synthetic fixture did not close normally')
         if simulator_boot_started:
             try:
-                command('simulator-shutdown', ['xcrun', 'simctl', 'shutdown', simulator], 120)
+                command('simulator-shutdown', ['xcrun', 'simctl', 'shutdown', simulator], 180)
             except BaseException as error:
                 state['lifecycleErrors'].append('Simulator shutdown: ' + str(error))
         if test_plan is not None:
