@@ -88,12 +88,42 @@ final class MobileDriverUITests: XCTestCase {
             if let target = q["q"], !target.isEmpty { match(target).tap() }
             app.typeText(q["text"] ?? "")
             return .text("ok")
+        case "/input":
+            return input(q)
         case "/quit":
             serving = false
             return .text("bye")
         default:
             return .text("unknown endpoint \(request.path)", status: 404)
         }
+    }
+
+    private func input(_ q: [String: String]) -> DriverServer.Response {
+        guard let role = q["role"], let field = q["field"], !field.isEmpty,
+              let text = q["text"] else {
+            return .text("Input role, nonempty field and text are required", status: 400)
+        }
+        let elements: XCUIElementQuery
+        switch role {
+        case "TextField": elements = app.descendants(matching: .textField)
+        case "SecureTextField": elements = app.descendants(matching: .secureTextField)
+        default: return .text("Unsupported input role", status: 400)
+        }
+        let matches = elements.matching(NSPredicate(
+            format: "placeholderValue == %@ OR label == %@ OR identifier == %@", field, field, field))
+        let count = matches.count
+        guard count == 1 else { return .text("Expected one exact input field", status: 409) }
+        let element = matches.element(boundBy: 0)
+        guard element.exists, element.isHittable else {
+            return .text("Input field is not actually hittable", status: 409)
+        }
+        element.tap()
+        guard issues.isEmpty else { return .text("Native input tap failed", status: 500) }
+        element.typeText(text)
+        guard issues.isEmpty else { return .text("Native input typing failed", status: 500) }
+        var target = describe(element)
+        target.removeValue(forKey: "value")
+        return .json(["role": role, "field": field, "count": count, "target": target])
     }
 
     /// The first element labelled or identified `text` exactly, else one containing it.
