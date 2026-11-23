@@ -18,6 +18,8 @@ def observed_input(tree, inventory, field, role):
         raise RuntimeError('Expected an original input role and accessibility tree')
     if not isinstance(inventory, dict) or not isinstance(inventory.get('items'), list):
         raise RuntimeError('Expected the original mobile element inventory')
+    if inventory.get('role') != role:
+        raise RuntimeError('The actual input inventory has a different role')
     if inventory.get('count') != len(inventory['items']):
         raise RuntimeError('The actual input inventory is truncated')
     text = tree.decode()
@@ -41,6 +43,8 @@ def observed_input(tree, inventory, field, role):
     if len(candidates) != 1:
         raise RuntimeError('Expected one actual ' + role + ' for ' + field + '; found ' + str(len(candidates)))
     element = candidates[0]
+    element['inventoryRole'] = inventory['role']
+    element['inventoryCount'] = inventory['count']
     items = [item for item in inventory['items'] if isinstance(item, dict)
              and item.get('frame') == element['frame'] and item.get('hittable') is True
              and isinstance(item.get('type'), str) and item['type']]
@@ -126,13 +130,14 @@ def main():
 
         def current_input():
             tree = call('/tree')
-            inventory = call('/find', {'q': '', 'limit': '1000'})
+            inventory = call('/find', {'q': '', 'limit': '1000', 'role': role})
             element, item = observed_input(tree, inventory, label, role)
             return tree, element, item
 
         tree, element, item = current_input()
         initial_value = item.get('value', '')
         selected = {'field': label, 'role': role, 'frame': item['frame'], 'rawType': item['type'],
+                    'inventoryRole': element['inventoryRole'], 'inventoryCount': element['inventoryCount'],
                     'label': item.get('label', ''), 'identifier': item.get('identifier', ''),
                     'placeholder': element['attributes'].get('placeholderValue'), 'hittable': True,
                     'treeSHA256': hashlib.sha256(tree).hexdigest()}
