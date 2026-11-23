@@ -440,6 +440,9 @@ def main():
                 try:
                     if driver_ready:
                         driver_ping('/quit')
+                except (OSError, http.client.HTTPException, subprocess.TimeoutExpired):
+                    pass
+                try:
                     driver.wait(30)
                 except (OSError, http.client.HTTPException, subprocess.TimeoutExpired):
                     pass
