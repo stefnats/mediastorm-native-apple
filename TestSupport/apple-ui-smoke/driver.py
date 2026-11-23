@@ -157,20 +157,19 @@ def main():
                     'placeholder': element['attributes'].get('placeholderValue'), 'hittable': True,
                     'treeSHA256': hashlib.sha256(tree).hexdigest()}
         outcome['inputSelections'].append(selected)
-        tap_item(item)
-        deadline = time.monotonic() + 5
-        while True:
-            tree, element, item = current_input()
-            keyboard = bool(re.search(rb'^\s*Keyboard,\s+0x[0-9a-fA-F]+,', tree, re.MULTILINE))
-            if keyboard or element['hasKeyboardFocus'] or time.monotonic() >= deadline:
-                selected['keyboardWitness'] = {'keyboardElement': keyboard,
-                    'inputHasKeyboardFocus': element['hasKeyboardFocus'],
-                    'observationalOnly': True,
-                    'treeSHA256': hashlib.sha256(tree).hexdigest()}
-                break
-            time.sleep(0.2)
         text = value.removesuffix('\n')
-        call('/type', {'text': text})  # HTTP 500 is fatal; never retry a failed XCTest event.
+        action = call('/input', {'role': role, 'field': label, 'text': text})
+        if (not isinstance(action, dict) or set(action) != {'role', 'field', 'count', 'target'}
+                or action['role'] != role or action['field'] != label or type(action['count']) is not int
+                or action['count'] != 1 or not isinstance(action['target'], dict)):
+            raise RuntimeError('Native field input did not confirm the original unique role and field')
+        target = action['target']
+        if ('value' in target or target.get('type') != item['type'] or target.get('hittable') is not True
+                or not isinstance(target.get('frame'), list) or len(target['frame']) != 4
+                or not all(type(number) is int for number in target['frame'])
+                or target['frame'][2] <= 0 or target['frame'][3] <= 0):
+            raise RuntimeError('Native field input did not return its actual safe target descriptor')
+        selected['nativeInputAction'] = action  # No request text or actual secure value is echoed.
         selected['actualTypeAccepted'] = True
         tree, element, item = current_input()
         actual = item.get('value', '')
