@@ -91,7 +91,7 @@ def main():
     button_type = None
 
     def call(endpoint, query=None):
-        connection = http.client.HTTPConnection('127.0.0.1', args.driver_port, timeout=25)
+        connection = http.client.HTTPConnection('127.0.0.1', args.driver_port, timeout=90 if endpoint == '/launch' else 25)
         try:
             target = endpoint + ('?' + urlencode(query) if query else '')
             connection.request('GET', target)
@@ -233,7 +233,18 @@ def main():
         if len(switches) != 1:
             raise RuntimeError('Expected one actually OFF Use Automatically control before profile selection')
         before = switches[0]
-        tap_item(before)
+        action = call('/switch', {'label': 'Use Automatically', 'expected': '0'})
+        if not isinstance(action, dict) or action.get('role') != 'Switch' or action.get('action') != 'tap' \
+                or action.get('label') != 'Use Automatically' or action.get('count') != 1 or action.get('targetCount') != 1:
+            raise RuntimeError('Native switch action did not confirm the exact unique control')
+        parent, target = action.get('parent', {}), action.get('target', {})
+        if not isinstance(parent, dict) or not isinstance(target, dict) \
+                or parent.get('label') != 'Use Automatically' or parent.get('type') != before['type'] \
+                or parent.get('value') != '0' or parent.get('hittable') is not True \
+                or target.get('type') != before['type'] or target.get('value') != '0' or target.get('hittable') is not True \
+                or not isinstance(target.get('frame'), list) or len(target['frame']) != 4 \
+                or any(type(value) is not int for value in target['frame']) or target['frame'][2] <= 0 or target['frame'][3] <= 0:
+            raise RuntimeError('Native switch action did not identify a real nested OFF switch')
         deadline = time.monotonic() + 5
         while True:
             found = call('/find', {'q': 'Use Automatically', 'limit': '100'})
@@ -241,7 +252,7 @@ def main():
                   if item.get('label') == 'Use Automatically' and item.get('type') == before['type']
                   and item.get('hittable') is True and item.get('value') == '1']
             if len(on) == 1:
-                outcome['profileReturn']['actualAutoToggle'] = {'before': before, 'after': on[0]}
+                outcome['profileReturn']['actualAutoToggle'] = {'before': before, 'after': on[0], 'nativeSwitchAction': action}
                 return
             if time.monotonic() >= deadline:
                 raise RuntimeError('Original Use Automatically UI did not prove OFF-to-ON transition')
