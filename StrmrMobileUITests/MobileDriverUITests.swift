@@ -115,6 +115,8 @@ final class MobileDriverUITests: XCTestCase {
             return .text("ok")
         case "/input":
             return input(q)
+        case "/switch":
+            return switchControl(q)
         case "/quit":
             serving = false
             return .text("bye")
@@ -149,6 +151,34 @@ final class MobileDriverUITests: XCTestCase {
             RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
         } while ProcessInfo.processInfo.systemUptime < deadline
         return false
+    }
+
+    /// Act on the unique native switch inside its exact labelled SwiftUI owner.
+    private func switchControl(_ q: [String: String]) -> DriverServer.Response {
+        guard let label = q["label"], !label.isEmpty,
+              let expected = q["expected"], expected == "0" || expected == "1" else {
+            return .text("Exact switch label and expected binary value are required", status: 400)
+        }
+        let parents = app.switches.matching(NSPredicate(format: "label == %@", label))
+        let count = parents.count
+        guard count == 1 else { return .text("Expected one exact labelled switch", status: 409) }
+        let parent = parents.element(boundBy: 0)
+        guard parent.exists, parent.isHittable, (parent.value as? String) == expected else {
+            return .text("Labelled switch is not currently hittable at the expected value", status: 409)
+        }
+        let children = parent.switches
+        let targetCount = children.count
+        guard targetCount == 1 else { return .text("Expected one nested native switch", status: 409) }
+        let element = children.element(boundBy: 0)
+        guard element.exists, element.isHittable, (element.value as? String) == expected else {
+            return .text("Nested switch is not currently hittable at the expected value", status: 409)
+        }
+        let owner = describe(parent)
+        let target = describe(element)
+        element.tap()
+        guard issues.isEmpty else { return .text("Native switch tap failed", status: 500) }
+        return .json(["role": "Switch", "label": label, "count": count,
+                      "targetCount": targetCount, "parent": owner, "target": target, "action": "tap"])
     }
 
     private func input(_ q: [String: String]) -> DriverServer.Response {
