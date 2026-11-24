@@ -16,6 +16,18 @@ struct ContentArtworkView: View {
                 Text("Choose from this title's delivered pictures. Your choice applies only to this profile; languages, sources and episode artwork remain unchanged.")
                     .font(.caption).foregroundStyle(.secondary)
                 if model.preference?.supported == true {
+                    if let style = model.pictureStyle {
+                        Text("Learn picture language and text style from the pictures you choose. Learning starts only after you enable it and needs three different titles per picture type. Your manual and standard choices take priority.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button(style.enabled ? "Picture style learning: On" : "Picture style learning: Off") {
+                            operation = Task { await model.updatePictureStyle(enabled: !style.enabled) }
+                        }.disabled(model.busy)
+                        Text("Poster choices: \(style.posterSamples); background choices: \(style.backdropSamples)")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("Forget learned picture style") {
+                            operation = Task { await model.updatePictureStyle(enabled: nil, reset: true) }
+                        }.disabled(model.busy)
+                    }
                     Picker("Picture",selection:$kind) {
                         ForEach(ContentArtworkKind.allCases,id:\.self) { Text($0.label).tag($0) }
                     }
@@ -39,6 +51,12 @@ struct ContentArtworkView: View {
                 }
                 if model.busy { ProgressView() }
                 if let message = model.message { Text(message).foregroundStyle(.secondary) }
+                if let message = model.pictureStyleMessage {
+                    Text(message).foregroundStyle(.secondary)
+                    if model.pictureStyle == nil, !model.busy {
+                        Button("Reload picture learning") { operation = Task { await model.load() } }
+                    }
+                }
                 if let confirmation = model.confirmation { Text(confirmation).foregroundStyle(.secondary) }
                 if !model.busy, model.needsGalleryReload {
                     Button("Reload title pictures") { operation = Task { await model.reloadGallery() } }

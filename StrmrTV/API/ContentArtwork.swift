@@ -63,9 +63,17 @@ protocol ContentArtworkAPI: AnyObject {
     func readAllContentArtwork(_ context: SourceActionContext) async throws -> [ContentArtworkPreference]
     func setContentArtwork(_ title: Title, kind: ContentArtworkKind, url: String?, context: SourceActionContext) async throws -> ContentArtworkPreference
     func reloadContentArtworkTitle(_ title: Title, context: SourceActionContext) async throws -> Title
+    func readPictureStyle(context: SourceActionContext) async throws -> PictureStyleState
+    func updatePictureStyle(enabled: Bool?, reset: Bool, context: SourceActionContext) async throws -> PictureStyleState
 }
 
 extension ContentArtworkAPI {
+    func readPictureStyle(context: SourceActionContext) async throws -> PictureStyleState {
+        throw PersonalTasteError.unavailable
+    }
+    func updatePictureStyle(enabled: Bool?, reset: Bool, context: SourceActionContext) async throws -> PictureStyleState {
+        throw PersonalTasteError.unavailable
+    }
     /// Older/test adapters remain unavailable rather than silently claiming a
     /// preference read refreshed the delivered metadata gallery.
     func reloadContentArtworkTitle(_ title: Title, context: SourceActionContext) async throws -> Title {

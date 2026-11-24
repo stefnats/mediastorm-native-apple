@@ -79,6 +79,8 @@ final class ContentArtworkModel {
     private(set) var message: String?
     private(set) var confirmation: String?
     private(set) var needsGalleryReload = false
+    private(set) var pictureStyle: PictureStyleState?
+    private(set) var pictureStyleMessage: String?
     private let api: any ContentArtworkAPI
     private let store: PersonalArtworkStore
     private var closed = false
@@ -106,7 +108,42 @@ final class ContentArtworkModel {
             store.confirmRead(context,titleID:title.id,readRevision:revision,value:value)
             preference = value
             if !value.supported { message = String(localized:"Personal pictures are unavailable on this server.") }
+            if value.supported { await loadPictureStyle() }
         } catch { if !closed, !Task.isCancelled, api.isCurrent(context) { message = PersonalTasteError.message(error) } }
+    }
+    private func loadPictureStyle() async {
+        pictureStyle = nil; pictureStyleMessage = nil
+        do {
+            let value = try await api.readPictureStyle(context: context)
+            try check()
+            pictureStyle = try value.validated(profileID: context.profileID)
+        } catch {
+            // This additive capability is optional on older servers and adapters.
+            if !closed, !Task.isCancelled, api.isCurrent(context),
+               (error as? APIError)?.statusCode != 404, !(error is PersonalTasteError) {
+                pictureStyleMessage = PersonalTasteError.message(error)
+            }
+        }
+    }
+    func updatePictureStyle(enabled: Bool?, reset: Bool = false) async {
+        guard !busy, !closed, pictureStyle != nil else { return }
+        busy = true; pictureStyleMessage = nil; confirmation = nil
+        defer { busy = false }
+        do {
+            try check()
+            let value = try await api.updatePictureStyle(enabled: enabled, reset: reset, context: context)
+            try check()
+            _ = try value.validated(profileID: context.profileID)
+            pictureStyle = try PictureStyleWire.confirmed(value, enabled: enabled, reset: reset)
+            confirmation = reset ? String(localized:"Learned picture style forgotten. Your manual pictures are preserved.")
+                                 : String(localized:"Picture learning preference saved. New choices apply when titles are reloaded.")
+        } catch {
+            // An unacknowledged write is not retried or presented as saved.
+            pictureStyle = nil
+            if !closed, !Task.isCancelled, api.isCurrent(context) {
+                pictureStyleMessage = PersonalTasteError.message(error)
+            }
+        }
     }
     /// An explicit metadata read renews the server's delivered gallery. Only
     /// after a second confirmed preference read do the new choices become usable.
@@ -128,6 +165,7 @@ final class ContentArtworkModel {
                   value.contentId != nil || value.choice(.poster) == nil && value.choice(.backdrop) == nil else { throw PersonalTasteError.unavailable }
             store.confirmRead(context,titleID:original.id,readRevision:revision,value:value)
             title = fresh; preference = value; needsGalleryReload = false
+            await loadPictureStyle()
             confirmation = String(localized:"Title pictures reloaded. Choose a picture explicitly.")
         } catch {
             if !closed, !Task.isCancelled, api.isCurrent(context) { message = PersonalTasteError.message(error) }
@@ -146,6 +184,7 @@ final class ContentArtworkModel {
             store.confirmSaved(context,titleID:title.id,value:value,kind:kind)
             preference = value
             confirmation = url == nil ? String(localized:"Standard picture restored for this profile.") : String(localized:"Picture saved for this profile.")
+            await loadPictureStyle()
         } catch {
             preference = nil // Do not automatically retry an unacknowledged field update.
             if (error as? APIError)?.statusCode == 409 { needsGalleryReload = true }

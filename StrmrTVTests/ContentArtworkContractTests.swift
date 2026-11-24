@@ -32,6 +32,16 @@ final class ContentArtworkTestAPI: ContentArtworkAPI {
     var readAll: (() async throws -> [ContentArtworkPreference])?
     var readOne: (() async throws -> ContentArtworkPreference)?
     var write: ((Title,ContentArtworkKind,String?) async throws -> ContentArtworkPreference)?
+    var readStyle: (() async throws -> PictureStyleState)?
+    var writeStyle: ((Bool?,Bool) async throws -> PictureStyleState)?
+    func readPictureStyle(context: SourceActionContext) async throws -> PictureStyleState {
+        guard let readStyle else { throw PersonalTasteError.unavailable }
+        return try await readStyle()
+    }
+    func updatePictureStyle(enabled: Bool?, reset: Bool, context: SourceActionContext) async throws -> PictureStyleState {
+        guard let writeStyle else { throw PersonalTasteError.unavailable }
+        return try await writeStyle(enabled,reset)
+    }
     func sourceContext() -> SourceActionContext { context }
     func isCurrent(_ context: SourceActionContext) -> Bool { context == self.context }
     func readContentArtwork(_ id: String, context: SourceActionContext) async throws -> ContentArtworkPreference {
