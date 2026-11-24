@@ -390,7 +390,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, {'contentId': 'tmdb:movie:1', 'preferLocalFiles': False, 'localSourcePreferenceSupported': False})
             return
         if suffix == 'history/progress' and profile == 'pin':
-            if allowed('POST'):
+            if allowed('POST', ('profileId',)):
+                if query.get('profileId', ['pin']) != ['pin']:
+                    return self.reply(400, {'error': 'Only the original synthetic progress profile is supported'})
                 return self.progress(body)
             return
         if path == '/api/video/segments':

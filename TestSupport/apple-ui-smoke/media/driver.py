@@ -45,14 +45,14 @@ def precise_frame_matches(tokens, item):
     return legacy[2] > 0 and legacy[3] > 0 and precise[2] > 0 and precise[3] > 0
 
 
-def observed_button(tree, inventory, labels, prefix=False):
-    """Select one observed Button role and its current hittable inventory entry."""
-    if not isinstance(tree, bytes) or not isinstance(inventory, dict) or not isinstance(inventory.get('items'), list):
-        raise RuntimeError('Expected actual button tree and inventory')
-    if inventory.get('role') != 'Button':
-        raise RuntimeError('Actual button inventory has a different role')
-    if inventory.get('count') != len(inventory['items']):
-        raise RuntimeError('Actual button inventory is truncated')
+class ObservedButtonUnavailable(RuntimeError):
+    """The current complete UI observation contains no hittable target Button."""
+
+
+def button_tree_candidates(tree, labels, prefix=False):
+    """Retain every enabled actual tree Button candidate before any native query."""
+    if not isinstance(tree, bytes):
+        raise RuntimeError('Expected actual button tree bytes')
     text = tree.decode()
     if 'Element subtree:\n' not in text:
         raise RuntimeError('Missing actual element subtree')
@@ -69,6 +69,21 @@ def observed_button(tree, inventory, labels, prefix=False):
         if re.search(r'\bDisabled\b', match[5]):
             continue
         tokens = [match[i] for i in range(1, 5)]
+        candidates.append({'label': label, 'frameTokens': tokens, 'attributes': attributes})
+    return candidates
+
+
+def observed_button(tree, inventory, labels, prefix=False):
+    """Select one observed Button role and its current hittable inventory entry."""
+    if not isinstance(tree, bytes) or not isinstance(inventory, dict) or not isinstance(inventory.get('items'), list):
+        raise RuntimeError('Expected actual button tree and inventory')
+    if inventory.get('role') != 'Button':
+        raise RuntimeError('Actual button inventory has a different role')
+    if inventory.get('count') != len(inventory['items']):
+        raise RuntimeError('Actual button inventory is truncated')
+    candidates = []
+    for candidate in button_tree_candidates(tree, labels, prefix):
+        label, tokens = candidate['label'], candidate['frameTokens']
         items = [item for item in inventory['items'] if isinstance(item, dict)
                  and precise_frame_matches(tokens, item) and item.get('label') == label
                  and item.get('hittable') is True and isinstance(item.get('type'), str)]
@@ -76,6 +91,8 @@ def observed_button(tree, inventory, labels, prefix=False):
             candidates.append(items[0])
         elif len(items) > 1:
             raise RuntimeError('Ambiguous actual button inventory')
+    if not candidates:
+        raise ObservedButtonUnavailable('No observed hittable button for ' + repr(labels))
     if len(candidates) != 1:
         raise RuntimeError('Expected one observed hittable button for ' + repr(labels))
     return dict(candidates[0], inventoryRole=inventory['role'], inventoryCount=inventory['count'])
@@ -372,7 +389,28 @@ def main():
             tree_path = args.output / (stem + '-tree.txt')
             tree_path.write_bytes(tree)
             record['tree'] = {'path': tree_path.name, 'sha256': hashlib.sha256(tree).hexdigest()}
-            inventory = call('/find', {'q': '', 'limit': '1000', 'role': 'Button'})
+            candidates = button_tree_candidates(tree, labels, prefix)
+            record['treeCandidates'] = candidates
+            actual_labels = sorted({candidate['label'] for candidate in candidates})
+            if not actual_labels:
+                raise ObservedButtonUnavailable('No actual enabled tree Button candidate for ' + repr(labels))
+            inventory = {'role': 'Button', 'count': 0, 'items': [],
+                         'scope': 'Complete matching inventories for actual tree candidate labels'}
+            queries = record['queries'] = []
+            for label in actual_labels:
+                query = {'q': label, 'limit': '1000', 'role': 'Button'}
+                response = call('/find', query)
+                query_path = args.output / (stem + '-query-' + str(len(queries) + 1).zfill(2) + '.json')
+                query_path.write_text(json.dumps(response, indent=2, allow_nan=False) + '\n')
+                queries.append({'query': query, 'path': query_path.name,
+                                'sha256': hashlib.sha256(query_path.read_bytes()).hexdigest()})
+                if (not isinstance(response, dict) or response.get('role') != 'Button'
+                        or not isinstance(response.get('items'), list)
+                        or type(response.get('count')) is not int
+                        or response['count'] != len(response['items'])):
+                    raise RuntimeError('Actual candidate-label Button inventory is incomplete or invalid')
+                inventory['count'] += response['count']
+                inventory['items'].extend(response['items'])
             inventory_path = args.output / (stem + '-inventory.json')
             inventory_path.write_text(json.dumps(inventory, indent=2, allow_nan=False) + '\n')
             record['inventory'] = {'path': inventory_path.name,
@@ -466,11 +504,10 @@ def main():
         record['initialMedia'] = save_playback_evidence('initial-media', initial)
         checkpoint('08-initial-player')
         # AVKit chrome may hide. Capture what really exists, never force a video route or canvas tap.
-        initial_tree = call('/tree')
-        initial_inventory = call('/find', {'q': '', 'limit': '1000', 'role': 'Button'})
         try:
-            record['initialCloseControl'] = observed_button(initial_tree, initial_inventory, ('Close', 'Done'))
-        except RuntimeError as error:
+            initial_close, _, _ = current_button(('Close', 'Done'))
+            record['initialCloseControl'] = initial_close
+        except ObservedButtonUnavailable as error:
             record['initialCloseObservation'] = str(error)
         deadline = time.monotonic() + 60
         while True:

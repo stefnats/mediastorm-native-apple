@@ -38,7 +38,7 @@ LEAVES = {
     'TestSupport/apple-ui-smoke/tvos/fixture.py',
     'TestSupport/apple-ui-smoke/tvos/run-ci.py',
 }
-PINS = {'fixture.py': 'f165c8e74c2a1eacfca9077dac8389628c8268002224dd5642c4cf0af0174e3d', 'driver.py': 'a36ba063bcd2b154cf80d09628ddc613d7ee5b1101031e5ab7eeb80b9778ab73', 'generate_media.py': '22bce4f2f22ca06047cf2a86be9cbb02c1096efef3abd58abfd5433b478e9420', 'media/ui-smoke.mp4': 'cb5e2eb01783cacbaa09495cd5c280791ee53540257b94a5cabfe30bc651561a', 'media/media-evidence.json': '8b947d0b798e41f33b71a270171e68b54e69d95e7124e4cbfa973ce0b053123e'}
+PINS = {'fixture.py': '092e68c1eacaa0f9da22079fe9df70e9c9c48dd9fc754066239aa561bb877e4f', 'driver.py': '6a2f159881d60738824299c341cce0e3bd0cd6a55ecbc45dcb95c4de123f9aeb', 'generate_media.py': '22bce4f2f22ca06047cf2a86be9cbb02c1096efef3abd58abfd5433b478e9420', 'media/ui-smoke.mp4': 'cb5e2eb01783cacbaa09495cd5c280791ee53540257b94a5cabfe30bc651561a', 'media/media-evidence.json': '8b947d0b798e41f33b71a270171e68b54e69d95e7124e4cbfa973ce0b053123e'}
 EXPECTED_CHECKPOINTS = ['01-reset-server', '02-login', '03-profiles', '04-pin-prompt', '05-bad-pin', '06-home-with-card', '07-movie-details', '08-initial-player', '09-player-progress', '10-exit-details']
 
 
