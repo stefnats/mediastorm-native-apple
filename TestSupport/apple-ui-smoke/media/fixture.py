@@ -425,7 +425,7 @@ class Handler(BaseHTTPRequestHandler):
             if allowed('GET'):
                 return self.reply(200, [{'seriesId': 'tmdb:movie:' + str(i), 'seriesTitle': 'Synthetic Film ' + str(i),
                                          'year': 2020, 'posterUrl': s.origin + '/art.png', 'backdropUrl': s.origin + '/art.png',
-                                         'externalIds': {'tmdb': str(i)}, 'percentWatched': 10, 'status': 'released'} for i in range(1, 7)])
+                                         'externalIds': {'tmdb': str(i)}, 'percentWatched': 10, 'status': 'released'} for i in (1,)])
             return
         if suffix == 'details-bundle' or path == '/api/metadata/movies/details':
             if not allowed('GET', ('type', 'titleId', 'name', 'tmdbId', 'imdbId', 'year', 'userId')):
