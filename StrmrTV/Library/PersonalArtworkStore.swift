@@ -38,6 +38,15 @@ final class PersonalArtworkStore {
             next[id] = value
         }
         self.values = next
+        // A fresh authoritative read retires display evidence for removed
+        // preferences or a manual picture chosen elsewhere. Rejected old reads
+        // never reach this point and cannot erase a just-confirmed reset.
+        for id in Array(standardPreviews.keys) {
+            guard let value = next[id] else { standardPreviews[id] = nil; continue }
+            for kind in ContentArtworkKind.allCases where value.choice(kind) != nil {
+                standardPreviews[id]?[kind] = nil
+            }
+        }
     }
     func confirmSaved(_ original: SourceActionContext, titleID: String, value: ContentArtworkPreference, kind: ContentArtworkKind? = nil, standardURL: String? = nil) {
         guard context?.sameViewer(as:original) == true, api.isCurrent(original),

@@ -150,6 +150,10 @@ final class PictureStyleTests: XCTestCase {
         await model.save(kind:.poster,url:nil)
         store.replaceConfirmedRead(original,readRevision:oldRevision,values:[])
         XCTAssertEqual(store.poster(title.id,original:title.poster?.url),title.standardPoster?.url)
+        let currentRevision = store.revision
+        store.replaceConfirmedRead(original,readRevision:currentRevision,values:[])
+        store.replaceConfirmedRead(original,readRevision:currentRevision,values:[ContentArtworkFixture.preference()])
+        XCTAssertEqual(store.poster(title.id,original:"fresh-automatic-picture"),"fresh-automatic-picture")
         api.context = PersonalTasteFixture.context("other")
         XCTAssertEqual(store.poster(title.id,original:"other-profile-default"),"other-profile-default")
         api.values = []; store.activate(api.context); await store.waitForRead()
