@@ -101,4 +101,61 @@ final class PictureStyleTests: XCTestCase {
         XCTAssertEqual(ContentArtworkWire.options(legacy, kind: .poster).first?.preview, legacy.textPoster?.url)
         XCTAssertEqual(ContentArtworkWire.options(legacy, kind: .backdrop).first?.preview, legacy.backdrop?.url)
     }
+
+    private func learnedTitle() throws -> Title {
+        try JSONDecoder().decode(Title.self, from: Data(#"{"id":"tt123","name":"Synthetic cached learned title","mediaType":"movie","poster":{"url":"https://images.invalid/learned.jpg"},"standardPoster":{"url":"https://images.invalid/original.jpg"},"posters":[{"url":"https://images.invalid/poster-choice.jpg"}],"backdrop":{"url":"https://images.invalid/learned-back.jpg"},"standardBackdrop":{"url":"https://images.invalid/original-back.jpg"}}"#.utf8))
+    }
+
+    func testConfirmedStandardResetUpdatesCachedDisplayWithoutInventingServerURL() async throws {
+        let api = ContentArtworkTestAPI(), title = try learnedTitle()
+        let store = await ContentArtworkFixture.store(api)
+        let model = ContentArtworkModel(title:title,context:api.context,api:api,store:store)
+        await model.load()
+        XCTAssertEqual(store.poster(title.id,original:title.poster?.url),title.poster?.url)
+        await model.save(kind:.poster,url:nil)
+        XCTAssertNil(api.values.first?.posterUrl)
+        XCTAssertEqual(store.poster(title.id,original:title.poster?.url),title.standardPoster?.url)
+        let legacyAPI = ContentArtworkTestAPI(), legacy = try ContentArtworkFixture.title()
+        let legacyStore = await ContentArtworkFixture.store(legacyAPI)
+        let legacyModel = ContentArtworkModel(title:legacy,context:legacyAPI.context,api:legacyAPI,store:legacyStore)
+        await legacyModel.load(); await legacyModel.save(kind:.poster,url:nil)
+        XCTAssertNil(legacyAPI.values.first?.posterUrl)
+        XCTAssertEqual(legacyStore.poster(legacy.id,original:legacy.poster?.url),legacy.poster?.url)
+    }
+
+    func testManualReplacementClearsOnlyItsOwnStandardDisplay() async throws {
+        let api = ContentArtworkTestAPI(), title = try learnedTitle()
+        let store = await ContentArtworkFixture.store(api)
+        let model = ContentArtworkModel(title:title,context:api.context,api:api,store:store)
+        await model.load()
+        await model.save(kind:.poster,url:nil); await model.save(kind:.backdrop,url:nil)
+        XCTAssertEqual(store.poster(title.id,original:title.poster?.url),title.standardPoster?.url)
+        XCTAssertEqual(store.backdrop(title.id,original:title.backdrop?.url),title.standardBackdrop?.url)
+        await model.save(kind:.poster,url:ContentArtworkFixture.poster)
+        XCTAssertEqual(api.values.first?.posterUrl,ContentArtworkFixture.poster)
+        XCTAssertNil(api.values.first?.backdropUrl)
+        XCTAssertEqual(store.poster(title.id,original:title.poster?.url),ContentArtworkFixture.poster)
+        XCTAssertEqual(store.backdrop(title.id,original:title.backdrop?.url),title.standardBackdrop?.url)
+        let staleOpposite = ContentArtworkFixture.preference(poster:ContentArtworkFixture.poster,backdrop:"stale-opposite-field")
+        store.confirmSaved(api.context,titleID:title.id,value:staleOpposite,kind:.poster)
+        XCTAssertEqual(store.backdrop(title.id,original:title.backdrop?.url),title.standardBackdrop?.url)
+    }
+
+    func testStandardDisplayRejectsLateReadAndDoesNotCrossProfileActivation() async throws {
+        let api = ContentArtworkTestAPI(), title = try learnedTitle()
+        let original = api.context, store = await ContentArtworkFixture.store(api)
+        let model = ContentArtworkModel(title:title,context:original,api:api,store:store)
+        await model.load()
+        let oldRevision = store.revision
+        await model.save(kind:.poster,url:nil)
+        store.replaceConfirmedRead(original,readRevision:oldRevision,values:[])
+        XCTAssertEqual(store.poster(title.id,original:title.poster?.url),title.standardPoster?.url)
+        api.context = PersonalTasteFixture.context("other")
+        XCTAssertEqual(store.poster(title.id,original:"other-profile-default"),"other-profile-default")
+        api.values = []; store.activate(api.context); await store.waitForRead()
+        store.confirmSaved(original,titleID:title.id,value:ContentArtworkFixture.preference(),kind:.poster,standardURL:title.standardPoster?.url)
+        store.replaceConfirmedRead(original,readRevision:oldRevision,values:[ContentArtworkFixture.preference()])
+        XCTAssertEqual(store.poster(title.id,original:"other-profile-default"),"other-profile-default")
+        XCTAssertTrue(api.values.isEmpty)
+    }
 }

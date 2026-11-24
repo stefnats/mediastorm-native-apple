@@ -8,6 +8,7 @@ final class PersonalArtworkStore {
     static let shared = PersonalArtworkStore()
     private var context: SourceActionContext?
     private var values: [String:ContentArtworkPreference] = [:]
+    private var standardPreviews: [String:[ContentArtworkKind:String]] = [:]
     private(set) var revision = 0
     private let api: any ContentArtworkAPI
     @ObservationIgnored private var loadTask: Task<Void,Never>?
@@ -15,7 +16,7 @@ final class PersonalArtworkStore {
     init(api: any ContentArtworkAPI = APIClient.shared) { self.api = api }
     func clear() {
         loadTask?.cancel(); loadTask = nil
-        context = nil; values = [:]; revision += 1
+        context = nil; values = [:]; standardPreviews = [:]; revision += 1
     }
     func activate(_ original: SourceActionContext) {
         clear(); context = original
@@ -38,7 +39,7 @@ final class PersonalArtworkStore {
         }
         self.values = next
     }
-    func confirmSaved(_ original: SourceActionContext, titleID: String, value: ContentArtworkPreference, kind: ContentArtworkKind? = nil) {
+    func confirmSaved(_ original: SourceActionContext, titleID: String, value: ContentArtworkPreference, kind: ContentArtworkKind? = nil, standardURL: String? = nil) {
         guard context?.sameViewer(as:original) == true, api.isCurrent(original),
               value.supported, value.contentId == ContentArtworkWire.key(titleID) else { return }
         let key = ContentArtworkWire.key(titleID)
@@ -49,6 +50,14 @@ final class PersonalArtworkStore {
                 posterUrl:kind == .poster ? value.posterUrl : previous.posterUrl,
                 backdropUrl:kind == .backdrop ? value.backdropUrl : previous.backdropUrl)
         } else { values[key] = value }
+        // Display-only evidence must never manufacture a server preference URL.
+        // A confirmed explicit choice supersedes only its own standard preview.
+        for field in ContentArtworkKind.allCases where (kind == nil || field == kind) && value.choice(field) != nil {
+            standardPreviews[key]?[field] = nil
+        }
+        if let kind, value.choice(kind) == nil, let standardURL, !standardURL.isEmpty {
+            standardPreviews[key, default:[:]][kind] = standardURL
+        }
         revision += 1
     }
     func confirmRead(_ original: SourceActionContext, titleID: String, readRevision: Int, value: ContentArtworkPreference) {
@@ -66,8 +75,12 @@ final class PersonalArtworkStore {
         guard let context, context.sameViewer(as:api.sourceContext()) else { return nil }
         return values[ContentArtworkWire.key(id)]
     }
-    func poster(_ id: String, original: String?) -> String? { preference(id)?.choice(.poster) ?? original }
-    func backdrop(_ id: String, original: String?) -> String? { preference(id)?.choice(.backdrop) ?? original }
+    private func picture(_ id: String, kind: ContentArtworkKind, original: String?) -> String? {
+        guard let preference = preference(id) else { return original }
+        return preference.choice(kind) ?? standardPreviews[ContentArtworkWire.key(id)]?[kind] ?? original
+    }
+    func poster(_ id: String, original: String?) -> String? { picture(id,kind:.poster,original:original) }
+    func backdrop(_ id: String, original: String?) -> String? { picture(id,kind:.backdrop,original:original) }
 }
 
 @MainActor @Observable
@@ -181,7 +194,8 @@ final class ContentArtworkModel {
             let value = try await api.setContentArtwork(title,kind:kind,url:url,context:context)
             try check()
             guard value.supported, value.contentId == ContentArtworkWire.key(title.id), value.choice(kind) == url else { throw PersonalTasteError.unavailable }
-            store.confirmSaved(context,titleID:title.id,value:value,kind:kind)
+            let standardURL = url == nil ? (kind == .poster ? title.standardPoster?.url : title.standardBackdrop?.url) : nil
+            store.confirmSaved(context,titleID:title.id,value:value,kind:kind,standardURL:standardURL)
             preference = value
             confirmation = url == nil ? String(localized:"Standard picture restored for this profile.") : String(localized:"Picture saved for this profile.")
             await loadPictureStyle()
