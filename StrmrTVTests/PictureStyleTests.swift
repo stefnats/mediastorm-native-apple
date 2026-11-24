@@ -78,4 +78,27 @@ final class PictureStyleTests: XCTestCase {
         XCTAssertThrowsError(try PictureStyleWire.confirmed(style(posters:1),enabled:nil,reset:true))
         XCTAssertThrowsError(try PictureStyleWire.body(enabled:true,reset:true))
     }
+
+    func testLearnedTitleKeepsOriginalStandardPreviewAndDeliveredManualVariants() throws {
+        let title = try JSONDecoder().decode(Title.self, from: Data(#"{"id":"tt123","name":"Synthetic learned title","mediaType":"movie","poster":{"url":"https://images.invalid/learned.jpg"},"textPoster":{"url":"https://images.invalid/learned.jpg"},"standardPoster":{"url":"https://images.invalid/original-text.jpg"},"posters":[{"url":"https://images.invalid/original.jpg"},{"url":"https://images.invalid/original-text.jpg"}],"backdrop":{"url":"https://images.invalid/learned-back.jpg"},"standardBackdrop":{"url":"https://images.invalid/original-back.jpg"},"backdrops":[{"url":"https://images.invalid/original-back.jpg"},{"url":"https://images.invalid/other-back.jpg"}]}"#.utf8))
+        XCTAssertEqual(title.standardPoster?.url, "https://images.invalid/original-text.jpg")
+        XCTAssertEqual(title.standardBackdrop?.url, "https://images.invalid/original-back.jpg")
+        let posters = ContentArtworkWire.options(title, kind: .poster)
+        let backgrounds = ContentArtworkWire.options(title, kind: .backdrop)
+        XCTAssertNil(posters.first?.url)
+        XCTAssertEqual(posters.first?.preview, title.standardPoster?.url)
+        XCTAssertNil(backgrounds.first?.url)
+        XCTAssertEqual(backgrounds.first?.preview, title.standardBackdrop?.url)
+        XCTAssertEqual(posters.dropFirst().compactMap(\.url), [
+            "https://images.invalid/learned.jpg", "https://images.invalid/original.jpg", "https://images.invalid/original-text.jpg"])
+        XCTAssertEqual(backgrounds.dropFirst().compactMap(\.url), [
+            "https://images.invalid/learned-back.jpg", "https://images.invalid/original-back.jpg", "https://images.invalid/other-back.jpg"])
+        let reset = try ContentArtworkWire.body(title, kind: .poster, url: nil)
+        XCTAssertTrue(reset["posterUrl"] is NSNull)
+        XCTAssertNil(reset["backdropUrl"])
+        let legacy = try ContentArtworkFixture.title()
+        XCTAssertNil(legacy.standardPoster); XCTAssertNil(legacy.standardBackdrop)
+        XCTAssertEqual(ContentArtworkWire.options(legacy, kind: .poster).first?.preview, legacy.textPoster?.url)
+        XCTAssertEqual(ContentArtworkWire.options(legacy, kind: .backdrop).first?.preview, legacy.backdrop?.url)
+    }
 }

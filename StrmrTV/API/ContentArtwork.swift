@@ -27,7 +27,8 @@ struct ContentArtworkOption: Equatable, Identifiable {
 enum ContentArtworkWire {
     static func key(_ id: String) -> String { id.trimmingCharacters(in:.whitespacesAndNewlines).lowercased() }
     static func options(_ title: Title, kind: ContentArtworkKind) -> [ContentArtworkOption] {
-        let standard = kind == .poster ? (title.textPoster?.url ?? title.poster?.url) : title.backdrop?.url
+        let standard = kind == .poster ? (title.standardPoster?.url ?? title.textPoster?.url ?? title.poster?.url)
+            : (title.standardBackdrop?.url ?? title.backdrop?.url)
         let images = kind == .poster ? [title.poster,title.textPoster].compactMap { $0 } + (title.posters ?? [])
             : [title.backdrop,title.textBackdrop].compactMap { $0 } + (title.backdrops ?? [])
         var seen = Set<String>()

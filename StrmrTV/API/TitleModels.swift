@@ -16,10 +16,14 @@ struct Title: Decodable, Identifiable, Hashable {
     let overview: String?
     let year: Int?
     let poster: ImageRef?
+    /// The unpersonalized effective default when learned artwork is applied.
+    var standardPoster: ImageRef? = nil
     let posters: [ImageRef]?
     /// The poster with its title text when the server swapped `poster` for a textless one.
     let textPoster: ImageRef?
     let backdrop: ImageRef?
+    /// The unpersonalized default when learned artwork is applied.
+    var standardBackdrop: ImageRef? = nil
     let textBackdrop: ImageRef?
     /// Alternative backdrops beyond the primary one.
     let backdrops: [ImageRef]?
