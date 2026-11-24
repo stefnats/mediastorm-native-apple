@@ -22,6 +22,7 @@ UNIT_WORKFLOW_SHA256 = 'b5669572390f72c117badafa7f6022e6e59e7bd01d051f2fc6b2bcae
 LEAVES = {
     '.github/workflows/apple-ui-smoke.yml',
     'StrmrMobileUITests/MobileDriverUITests.swift',
+    'StrmrTV/Mobile/MobilePlayerControls.swift',
     'TestSupport/apple-ui-smoke/basic/driver.py',
     'TestSupport/apple-ui-smoke/basic/fixture.py',
     'TestSupport/apple-ui-smoke/basic/run-ci.py',
@@ -38,7 +39,7 @@ LEAVES = {
     'TestSupport/apple-ui-smoke/tvos/fixture.py',
     'TestSupport/apple-ui-smoke/tvos/run-ci.py',
 }
-PINS = {'fixture.py': '092e68c1eacaa0f9da22079fe9df70e9c9c48dd9fc754066239aa561bb877e4f', 'driver.py': '6a2f159881d60738824299c341cce0e3bd0cd6a55ecbc45dcb95c4de123f9aeb', 'generate_media.py': '22bce4f2f22ca06047cf2a86be9cbb02c1096efef3abd58abfd5433b478e9420', 'media/ui-smoke.mp4': 'cb5e2eb01783cacbaa09495cd5c280791ee53540257b94a5cabfe30bc651561a', 'media/media-evidence.json': '8b947d0b798e41f33b71a270171e68b54e69d95e7124e4cbfa973ce0b053123e'}
+PINS = {'fixture.py': '092e68c1eacaa0f9da22079fe9df70e9c9c48dd9fc754066239aa561bb877e4f', 'driver.py': '922852cb21ff90c558c0bf25f465c1e32a9c01518e046b16856f84cab5c8dba9', 'generate_media.py': '22bce4f2f22ca06047cf2a86be9cbb02c1096efef3abd58abfd5433b478e9420', 'media/ui-smoke.mp4': 'cb5e2eb01783cacbaa09495cd5c280791ee53540257b94a5cabfe30bc651561a', 'media/media-evidence.json': '8b947d0b798e41f33b71a270171e68b54e69d95e7124e4cbfa973ce0b053123e'}
 EXPECTED_CHECKPOINTS = ['01-reset-server', '02-login', '03-profiles', '04-pin-prompt', '05-bad-pin', '06-home-with-card', '07-movie-details', '08-initial-player', '09-player-progress', '10-exit-details']
 
 
@@ -180,7 +181,7 @@ def main():
     assert git('rev-parse', 'HEAD').decode().strip() == expected
     assert not git('status', '--porcelain'), 'Start from the clean exact checkout'
     assert hashlib.sha256((source / '.github/workflows/apple-source-actions.yml').read_bytes()).hexdigest() == UNIT_WORKFLOW_SHA256, 'Original unit workflow changed'
-    assert hashlib.sha256((source / 'StrmrMobileUITests/MobileDriverUITests.swift').read_bytes()).hexdigest() == 'b15329e5ae17a798084db17f1f2fee8f8cd618c9a24b8e180c7955997c8b4ee5', 'Shared test-only mobile driver changed'
+    assert hashlib.sha256((source / 'StrmrMobileUITests/MobileDriverUITests.swift').read_bytes()).hexdigest() == '04ed1df4743c9d6924b7fc6165811a6f6f05c4208dc73fb564c60b6159c85680', 'Shared test-only mobile driver changed'
     scripts = source / 'TestSupport/apple-ui-smoke/media'
     for name, digest in PINS.items():
         assert hashlib.sha256((scripts / name).read_bytes()).hexdigest() == digest

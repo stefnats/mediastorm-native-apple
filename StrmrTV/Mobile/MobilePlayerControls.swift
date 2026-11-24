@@ -131,6 +131,7 @@ final class MobilePlayerControls: UIView {
     func setOwnsTransport(_ owns: Bool) {
         guard owns != ownsTransport else { return }
         ownsTransport = owns
+        accessibilityIdentifier = owns ? "player.softwareSurface" : nil
         transport.isHidden = !owns
         NSLayoutConstraint.deactivate(owns ? rowOverlayConstraints : rowTransportConstraints)
         NSLayoutConstraint.activate(owns ? rowTransportConstraints : rowOverlayConstraints)

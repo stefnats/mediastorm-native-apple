@@ -282,6 +282,7 @@ final class MobileDriverUITests: XCTestCase {
         case .some("TextField"): elements = app.descendants(matching: .textField)
         case .some("SecureTextField"): elements = app.descendants(matching: .secureTextField)
         case .some("Button"): elements = app.descendants(matching: .button)
+        case .some("Other"): elements = app.descendants(matching: .other)
         default: return .text("Unsupported element role", status: 400)
         }
         let matches = text.isEmpty ? elements : elements

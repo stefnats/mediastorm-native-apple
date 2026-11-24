@@ -22,6 +22,7 @@ UNIT_WORKFLOW_SHA256 = 'b5669572390f72c117badafa7f6022e6e59e7bd01d051f2fc6b2bcae
 LEAVES = {
     '.github/workflows/apple-ui-smoke.yml',
     'StrmrMobileUITests/MobileDriverUITests.swift',
+    'StrmrTV/Mobile/MobilePlayerControls.swift',
     'TestSupport/apple-ui-smoke/basic/driver.py',
     'TestSupport/apple-ui-smoke/basic/fixture.py',
     'TestSupport/apple-ui-smoke/basic/run-ci.py',
@@ -183,7 +184,7 @@ def main():
     scripts = source / 'TestSupport/apple-ui-smoke/profile'
     for name, digest in PINS.items():
         assert hashlib.sha256((scripts / name).read_bytes()).hexdigest() == digest
-    assert hashlib.sha256((source / 'StrmrMobileUITests/MobileDriverUITests.swift').read_bytes()).hexdigest() == 'b15329e5ae17a798084db17f1f2fee8f8cd618c9a24b8e180c7955997c8b4ee5', 'Test-only public-state instrumentation changed'
+    assert hashlib.sha256((source / 'StrmrMobileUITests/MobileDriverUITests.swift').read_bytes()).hexdigest() == '04ed1df4743c9d6924b7fc6165811a6f6f05c4208dc73fb564c60b6159c85680', 'Test-only public-state instrumentation changed'
     output = args.output
     output.mkdir(mode=0o700)
     temporary = source / 'build/apple-ui-smoke/temporary'

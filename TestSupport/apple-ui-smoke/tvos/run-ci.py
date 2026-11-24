@@ -22,6 +22,7 @@ UNIT_WORKFLOW_SHA256 = 'b5669572390f72c117badafa7f6022e6e59e7bd01d051f2fc6b2bcae
 LEAVES = {
     '.github/workflows/apple-ui-smoke.yml',
     'StrmrMobileUITests/MobileDriverUITests.swift',
+    'StrmrTV/Mobile/MobilePlayerControls.swift',
     'TestSupport/apple-ui-smoke/basic/driver.py',
     'TestSupport/apple-ui-smoke/basic/fixture.py',
     'TestSupport/apple-ui-smoke/basic/run-ci.py',

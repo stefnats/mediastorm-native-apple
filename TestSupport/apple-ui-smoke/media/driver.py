@@ -98,6 +98,41 @@ def observed_button(tree, inventory, labels, prefix=False):
     return dict(candidates[0], inventoryRole=inventory['role'], inventoryCount=inventory['count'])
 
 
+def observed_software_surface(tree, inventory):
+    """Select only the uniquely observed original software player's live tap surface."""
+    identifier = 'player.softwareSurface'
+    if not isinstance(tree, bytes) or not isinstance(inventory, dict):
+        raise RuntimeError('Expected actual software surface tree and inventory')
+    if (inventory.get('role') != 'Other' or not isinstance(inventory.get('items'), list)
+            or type(inventory.get('count')) is not int
+            or inventory['count'] != len(inventory['items']) or inventory['count'] != 1):
+        raise RuntimeError('Expected one complete original Other surface inventory')
+    text = tree.decode()
+    if 'Element subtree:\n' not in text:
+        raise RuntimeError('Missing actual software surface element subtree')
+    subtree = text.split('Element subtree:\n', 1)[1].split('Path to element:', 1)[0]
+    number = r'-?\d+(?:\.\d+)?'
+    pattern = re.compile(r'^\s*([A-Za-z][A-Za-z0-9]*),\s+0x[0-9a-fA-F]+,\s+\{\{(' + number + r'),\s*('
+                         + number + r')\},\s*\{(' + number + r'),\s*(' + number + r')\}\}(.*)$', re.MULTILINE)
+    candidates = []
+    for match in pattern.finditer(subtree):
+        attributes = dict(re.findall(r"(?:^|,\s+)(label|identifier): '([^']*)'", match[6]))
+        if identifier in (attributes.get('label'), attributes.get('identifier')):
+            candidates.append((match, attributes))
+    if len(candidates) != 1:
+        raise RuntimeError('Software surface identifier or exact tap target is missing or ambiguous')
+    match, attributes = candidates[0]
+    item = inventory['items'][0]
+    if (match[1] != 'Other' or attributes.get('identifier') != identifier
+            or re.search(r'\bDisabled\b', match[6]) or not isinstance(item, dict)
+            or item.get('identifier') != identifier or item.get('label') != attributes.get('label', '')
+            or item.get('hittable') is not True or not isinstance(item.get('type'), str)
+            or not re.fullmatch(r'[0-9]+', item['type'])
+            or not precise_frame_matches([match[index] for index in range(2, 6)], item)):
+        raise RuntimeError('Original software surface is not the current exact hittable Other target')
+    return dict(item, inventoryRole='Other', inventoryCount=1)
+
+
 def playback_evidence(value):
     """Validate only the frozen local fixture's finite, original-source evidence."""
     if not isinstance(value, dict) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
@@ -422,6 +457,25 @@ def main():
             record['error'] = {'type': type(error).__name__, 'message': str(error)}
             raise
 
+    def current_software_surface():
+        record = outcome.setdefault('softwareSurfaceObservation', {})
+        record['observedAtUTC'] = datetime.now(timezone.utc).isoformat()
+        tree = call('/tree')
+        if not isinstance(tree, bytes):
+            raise RuntimeError('Expected actual software surface tree bytes')
+        tree_path = args.output / 'software-surface-tree.txt'
+        tree_path.write_bytes(tree)
+        record['tree'] = {'path': tree_path.name, 'sha256': hashlib.sha256(tree).hexdigest()}
+        query = {'q': 'player.softwareSurface', 'limit': '1000', 'role': 'Other'}
+        inventory = call('/find', query)
+        path = args.output / 'software-surface-inventory.json'
+        path.write_text(json.dumps(inventory, indent=2, allow_nan=False) + '\n')
+        record['inventory'] = {'query': query, 'path': path.name,
+                               'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
+        selected = observed_software_surface(tree, inventory)
+        record['selected'] = selected
+        return selected
+
     def save_playback_evidence(name, value):
         path = args.output / (name + '-fixture-evidence.json')
         path.write_text(json.dumps(value, indent=2) + '\n')
@@ -523,7 +577,21 @@ def main():
                 raise RuntimeError('No two genuine increasing unpaused samples over ten server seconds apart')
             time.sleep(0.5)
         checkpoint('09-player-progress')
-        close, tree, inventory = current_button(('Close', 'Done'))
+        try:
+            close, tree, inventory = current_button(('Close', 'Done'))
+        except ObservedButtonUnavailable as error:
+            record['exitControlsInitiallyUnavailable'] = str(error)
+            before_show = fixture_evidence()
+            require_single_admission(before_show)
+            require_unended(before_show)
+            record['beforeShowControlsEvidence'] = save_playback_evidence('before-show-controls', before_show)
+            surface = current_software_surface()
+            if surface.get('type') == button_type:
+                raise RuntimeError('Software surface unexpectedly has the learned Button type')
+            record['actualShowControlsSurface'] = surface
+            call('/tap', {'q': surface['identifier']})
+            record['showControlsTapAcknowledged'] = True
+            close, tree, inventory = current_button(('Close', 'Done'))
         # Use the original element.tap path: coordinate taps in a landscape AVKit player can assert.
         selector = close['label']
         exact = [item for item in inventory['items'] if selector in (item.get('label'), item.get('identifier'))]
