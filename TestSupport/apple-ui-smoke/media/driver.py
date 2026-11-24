@@ -133,6 +133,33 @@ def observed_software_surface(tree, inventory):
     return dict(item, inventoryRole='Other', inventoryCount=1)
 
 
+def require_unique_identifier_tap(tree, identifier, control):
+    """Reject a full-tree identifier/label collision before the original any-role tap."""
+    if not isinstance(tree, bytes) or not isinstance(identifier, str) or not identifier:
+        raise RuntimeError('Expected actual tree and nonempty observed tap identifier')
+    text = tree.decode()
+    if 'Element subtree:\n' not in text:
+        raise RuntimeError('Missing actual identifier tap element subtree')
+    subtree = text.split('Element subtree:\n', 1)[1].split('Path to element:', 1)[0]
+    number = r'-?\d+(?:\.\d+)?'
+    pattern = re.compile(r'^\s*([A-Za-z][A-Za-z0-9]*),\s+0x[0-9a-fA-F]+,\s+\{\{(' + number + r'),\s*('
+                         + number + r')\},\s*\{(' + number + r'),\s*(' + number + r')\}\}(.*)$', re.MULTILINE)
+    candidates = []
+    for match in pattern.finditer(subtree):
+        attributes = dict(re.findall(r"(?:^|,\s+)(label|identifier): '([^']*)'", match[6]))
+        if identifier in (attributes.get('identifier'), attributes.get('label')):
+            candidates.append((match, attributes))
+    if len(candidates) != 1:
+        raise RuntimeError('Observed identifier has a different or ambiguous exact native tap target')
+    match, attributes = candidates[0]
+    if (not isinstance(control, dict) or match[1] != 'Button'
+            or attributes.get('identifier') != identifier or control.get('identifier') != identifier
+            or control.get('label') != attributes.get('label', '') or control.get('hittable') is not True
+            or re.search(r'\bDisabled\b', match[6])
+            or not precise_frame_matches([match[index] for index in range(2, 6)], control)):
+        raise RuntimeError('Observed identifier tap target differs from the current original Button')
+
+
 def playback_evidence(value):
     """Validate only the frozen local fixture's finite, original-source evidence."""
     if not isinstance(value, dict) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
@@ -426,14 +453,16 @@ def main():
             record['tree'] = {'path': tree_path.name, 'sha256': hashlib.sha256(tree).hexdigest()}
             candidates = button_tree_candidates(tree, labels, prefix)
             record['treeCandidates'] = candidates
-            actual_labels = sorted({candidate['label'] for candidate in candidates})
-            if not actual_labels:
+            actual_queries = sorted({('identifier', candidate['attributes']['identifier'])
+                                     if candidate['attributes'].get('identifier') else ('q', candidate['label'])
+                                     for candidate in candidates})
+            if not actual_queries:
                 raise ObservedButtonUnavailable('No actual enabled tree Button candidate for ' + repr(labels))
             inventory = {'role': 'Button', 'count': 0, 'items': [],
-                         'scope': 'Complete matching inventories for actual tree candidate labels'}
+                         'scope': 'Complete matching inventories for actual tree candidate identifiers or labels'}
             queries = record['queries'] = []
-            for label in actual_labels:
-                query = {'q': label, 'limit': '1000', 'role': 'Button'}
+            for key, value in actual_queries:
+                query = {key: value, 'limit': '1000', 'role': 'Button'}
                 response = call('/find', query)
                 query_path = args.output / (stem + '-query-' + str(len(queries) + 1).zfill(2) + '.json')
                 query_path.write_text(json.dumps(response, indent=2, allow_nan=False) + '\n')
@@ -443,7 +472,10 @@ def main():
                         or not isinstance(response.get('items'), list)
                         or type(response.get('count')) is not int
                         or response['count'] != len(response['items'])):
-                    raise RuntimeError('Actual candidate-label Button inventory is incomplete or invalid')
+                    raise RuntimeError('Actual candidate Button inventory is incomplete or invalid')
+                if key == 'identifier' and any(not isinstance(item, dict) or item.get('identifier') != value
+                                               for item in response['items']):
+                    raise RuntimeError('Actual exact-identifier Button inventory names a different target')
                 inventory['count'] += response['count']
                 inventory['items'].extend(response['items'])
             inventory_path = args.output / (stem + '-inventory.json')
@@ -593,7 +625,9 @@ def main():
             record['showControlsTapAcknowledged'] = True
             close, tree, inventory = current_button(('Close', 'Done'))
         # Use the original element.tap path: coordinate taps in a landscape AVKit player can assert.
-        selector = close['label']
+        selector = close.get('identifier') or close['label']
+        if close.get('identifier'):
+            require_unique_identifier_tap(tree, selector, close)
         exact = [item for item in inventory['items'] if selector in (item.get('label'), item.get('identifier'))]
         if len(exact) != 1 or close.get('type') != button_type:
             raise RuntimeError('AVKit exit control is ambiguous; no hidden-control or coordinate fallback')

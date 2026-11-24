@@ -39,7 +39,7 @@ LEAVES = {
     'TestSupport/apple-ui-smoke/tvos/fixture.py',
     'TestSupport/apple-ui-smoke/tvos/run-ci.py',
 }
-PINS = {'fixture.py': '8fbf9160b96e70a0d5fe0c9d371966f7ef6d9abafc5bb5680bc20d3e9b8a00aa', 'driver.py': '922852cb21ff90c558c0bf25f465c1e32a9c01518e046b16856f84cab5c8dba9', 'generate_media.py': '22bce4f2f22ca06047cf2a86be9cbb02c1096efef3abd58abfd5433b478e9420', 'media/ui-smoke.mp4': 'cb5e2eb01783cacbaa09495cd5c280791ee53540257b94a5cabfe30bc651561a', 'media/media-evidence.json': '8b947d0b798e41f33b71a270171e68b54e69d95e7124e4cbfa973ce0b053123e'}
+PINS = {'fixture.py': '8fbf9160b96e70a0d5fe0c9d371966f7ef6d9abafc5bb5680bc20d3e9b8a00aa', 'driver.py': 'aa31b7ec7a7b6ccc927202dc1cbc56caee584463472bd53b17a11902179be279', 'generate_media.py': '22bce4f2f22ca06047cf2a86be9cbb02c1096efef3abd58abfd5433b478e9420', 'media/ui-smoke.mp4': 'cb5e2eb01783cacbaa09495cd5c280791ee53540257b94a5cabfe30bc651561a', 'media/media-evidence.json': '8b947d0b798e41f33b71a270171e68b54e69d95e7124e4cbfa973ce0b053123e'}
 EXPECTED_CHECKPOINTS = ['01-reset-server', '02-login', '03-profiles', '04-pin-prompt', '05-bad-pin', '06-home-with-card', '07-movie-details', '08-initial-player', '09-player-progress', '10-exit-details']
 
 
@@ -181,7 +181,7 @@ def main():
     assert git('rev-parse', 'HEAD').decode().strip() == expected
     assert not git('status', '--porcelain'), 'Start from the clean exact checkout'
     assert hashlib.sha256((source / '.github/workflows/apple-source-actions.yml').read_bytes()).hexdigest() == UNIT_WORKFLOW_SHA256, 'Original unit workflow changed'
-    assert hashlib.sha256((source / 'StrmrMobileUITests/MobileDriverUITests.swift').read_bytes()).hexdigest() == '0c54d09fb860233d46365d9c727178f016ebf66e7525f7c0cd7674f780aa4b5d', 'Shared test-only mobile driver changed'
+    assert hashlib.sha256((source / 'StrmrMobileUITests/MobileDriverUITests.swift').read_bytes()).hexdigest() == '8a8270d620b59eac3aa23bd816bf68f9d76f49d5ee5e009fbf67f2c511ce6b75', 'Shared test-only mobile driver changed'
     scripts = source / 'TestSupport/apple-ui-smoke/media'
     for name, digest in PINS.items():
         assert hashlib.sha256((scripts / name).read_bytes()).hexdigest() == digest

@@ -114,7 +114,7 @@ final class MobileDriverUITests: XCTestCase {
         case "/tree":
             return .text(app.debugDescription)
         case "/find":
-            return try find(q["q"] ?? "", limit: Int(q["limit"] ?? "") ?? 25, role: q["role"])
+            return try find(q["q"] ?? "", limit: Int(q["limit"] ?? "") ?? 25, role: q["role"], identifier: q["identifier"])
         case "/wait":
             let target = q["q"] ?? ""
             let element = match(target)
@@ -280,7 +280,7 @@ final class MobileDriverUITests: XCTestCase {
         return .text("not found after \(max) swipes: \(text)", status: 404)
     }
 
-    private func find(_ text: String, limit: Int, role: String? = nil) throws -> DriverServer.Response {
+    private func find(_ text: String, limit: Int, role: String? = nil, identifier: String? = nil) throws -> DriverServer.Response {
         let elements: XCUIElementQuery
         switch role {
         case .none: elements = app.descendants(matching: .any)
@@ -290,8 +290,14 @@ final class MobileDriverUITests: XCTestCase {
         case .some("Other"): elements = app.descendants(matching: .other)
         default: return .text("Unsupported element role", status: 400)
         }
-        let matches = text.isEmpty ? elements : elements
-            .matching(NSPredicate(format: "label CONTAINS[c] %@ OR identifier CONTAINS[c] %@", text, text))
+        let matches: XCUIElementQuery
+        if let identifier {
+            guard !identifier.isEmpty else { return .text("Exact identifier must not be empty", status: 400) }
+            matches = elements.matching(NSPredicate(format: "identifier == %@", identifier))
+        } else {
+            matches = text.isEmpty ? elements : elements
+                .matching(NSPredicate(format: "label CONTAINS[c] %@ OR identifier CONTAINS[c] %@", text, text))
+        }
         let count = matches.count
         let items = try (0..<min(count, limit)).map { try describe(matches.element(boundBy: $0)) }
         return .json(["count": count, "items": items, "role": role ?? "Any"])
