@@ -27,7 +27,12 @@ final class MobileDriverUITests: XCTestCase {
         while serving {
             if let request = server.next() {
                 issues = []
-                let response = handle(request)
+                let response: DriverServer.Response
+                do {
+                    response = try handle(request)
+                } catch {
+                    response = .text("Element snapshot failed", status: 500)
+                }
                 request.respond(issues.isEmpty ? response : .text(issues.joined(separator: "\n"), status: 500))
             } else {
                 RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.02))
@@ -35,7 +40,7 @@ final class MobileDriverUITests: XCTestCase {
         }
     }
 
-    private func handle(_ request: DriverServer.Request) -> DriverServer.Response {
+    private func handle(_ request: DriverServer.Request) throws -> DriverServer.Response {
         let q = request.query
         switch request.path {
         case "/ping":
@@ -91,7 +96,7 @@ final class MobileDriverUITests: XCTestCase {
         case "/swipe":
             return swipe(q)
         case "/scrollto":
-            return scrollTo(q["q"] ?? "", max: Int(q["max"] ?? "") ?? 12, direction: q["dir"] ?? "up")
+            return try scrollTo(q["q"] ?? "", max: Int(q["max"] ?? "") ?? 12, direction: q["dir"] ?? "up")
         case "/back":
             let back = app.navigationBars.buttons.element(boundBy: 0)
             guard back.exists else { return .text("no navigation back button", status: 404) }
@@ -109,20 +114,20 @@ final class MobileDriverUITests: XCTestCase {
         case "/tree":
             return .text(app.debugDescription)
         case "/find":
-            return find(q["q"] ?? "", limit: Int(q["limit"] ?? "") ?? 25, role: q["role"])
+            return try find(q["q"] ?? "", limit: Int(q["limit"] ?? "") ?? 25, role: q["role"])
         case "/wait":
             let target = q["q"] ?? ""
             let element = match(target)
             let found = element.waitForExistence(timeout: TimeInterval(q["timeout"] ?? "") ?? 20)
-            return found ? .json(describe(element)) : .text("not found: \(target)", status: 404)
+            return found ? .json(try describe(element)) : .text("not found: \(target)", status: 404)
         case "/type":
             if let target = q["q"], !target.isEmpty { match(target).tap() }
             app.typeText(q["text"] ?? "")
             return .text("ok")
         case "/input":
-            return input(q)
+            return try input(q)
         case "/switch":
-            return switchControl(q)
+            return try switchControl(q)
         case "/quit":
             serving = false
             return .text("bye")
@@ -160,7 +165,7 @@ final class MobileDriverUITests: XCTestCase {
     }
 
     /// Act on the unique native switch inside its exact labelled SwiftUI owner.
-    private func switchControl(_ q: [String: String]) -> DriverServer.Response {
+    private func switchControl(_ q: [String: String]) throws -> DriverServer.Response {
         guard let label = q["label"], !label.isEmpty,
               let expected = q["expected"], expected == "0" || expected == "1" else {
             return .text("Exact switch label and expected binary value are required", status: 400)
@@ -179,15 +184,15 @@ final class MobileDriverUITests: XCTestCase {
         guard element.exists, element.isHittable, (element.value as? String) == expected else {
             return .text("Nested switch is not currently hittable at the expected value", status: 409)
         }
-        let owner = describe(parent)
-        let target = describe(element)
+        let owner = try describe(parent)
+        let target = try describe(element)
         element.tap()
         guard issues.isEmpty else { return .text("Native switch tap failed", status: 500) }
         return .json(["role": "Switch", "label": label, "count": count,
                       "targetCount": targetCount, "parent": owner, "target": target, "action": "tap"])
     }
 
-    private func input(_ q: [String: String]) -> DriverServer.Response {
+    private func input(_ q: [String: String]) throws -> DriverServer.Response {
         guard let role = q["role"], let field = q["field"], !field.isEmpty,
               let text = q["text"] else {
             return .text("Input role, nonempty field and text are required", status: 400)
@@ -210,7 +215,7 @@ final class MobileDriverUITests: XCTestCase {
         guard issues.isEmpty else { return .text("Native input tap failed", status: 500) }
         element.typeText(text)
         guard issues.isEmpty else { return .text("Native input typing failed", status: 500) }
-        var target = describe(element)
+        var target = try describe(element)
         target.removeValue(forKey: "value")
         return .json(["role": role, "field": field, "count": count, "target": target])
     }
@@ -266,16 +271,16 @@ final class MobileDriverUITests: XCTestCase {
     }
 
     /// Swipes the page until an element labelled `text` is on screen and hittable.
-    private func scrollTo(_ text: String, max: Int, direction: String) -> DriverServer.Response {
+    private func scrollTo(_ text: String, max: Int, direction: String) throws -> DriverServer.Response {
         for _ in 0...max {
             let element = match(text)
-            if element.exists, element.isHittable { return .json(describe(element)) }
+            if element.exists, element.isHittable { return .json(try describe(element)) }
             direction == "down" ? app.swipeDown() : app.swipeUp()
         }
         return .text("not found after \(max) swipes: \(text)", status: 404)
     }
 
-    private func find(_ text: String, limit: Int, role: String? = nil) -> DriverServer.Response {
+    private func find(_ text: String, limit: Int, role: String? = nil) throws -> DriverServer.Response {
         let elements: XCUIElementQuery
         switch role {
         case .none: elements = app.descendants(matching: .any)
@@ -288,20 +293,21 @@ final class MobileDriverUITests: XCTestCase {
         let matches = text.isEmpty ? elements : elements
             .matching(NSPredicate(format: "label CONTAINS[c] %@ OR identifier CONTAINS[c] %@", text, text))
         let count = matches.count
-        let items = (0..<min(count, limit)).map { describe(matches.element(boundBy: $0)) }
+        let items = try (0..<min(count, limit)).map { try describe(matches.element(boundBy: $0)) }
         return .json(["count": count, "items": items, "role": role ?? "Any"])
     }
 
-    private func describe(_ element: XCUIElement) -> [String: Any] {
-        let f = element.frame
+    private func describe(_ element: XCUIElement) throws -> [String: Any] {
+        let snapshot = try element.snapshot()
+        let f = snapshot.frame
         return [
-            "label": element.label,
-            "identifier": element.identifier,
-            "type": "\(element.elementType.rawValue)",
+            "label": snapshot.label,
+            "identifier": snapshot.identifier,
+            "type": "\(snapshot.elementType.rawValue)",
             "hittable": element.isHittable,
             "frame": [Int(f.minX), Int(f.minY), Int(f.width), Int(f.height)],
             "preciseFrame": [Double(f.minX), Double(f.minY), Double(f.width), Double(f.height)],
-            "value": (element.value as? String) ?? "",
+            "value": (snapshot.value as? String) ?? "",
         ]
     }
 }
